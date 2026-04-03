@@ -1,0 +1,57 @@
+# Документация: https://www.mkdocs.org/ и https://squidfunk.github.io/mkdocs-material/
+# После создания репозитория на GitHub замените site_url на фактический адрес Pages.
+site_name: UMEC Documentation
+site_description: Пошаговые сценарии UMEC REST API
+site_url: https://UMEC-Corp.github.io/utilities-quickstarts/
+repo_url: https://github.com/UMEC-Corp/utilities-quickstarts
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.expand
+    - toc.integrate
+    - search.suggest
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Тёмная тема
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Светлая тема
+
+plugins:
+  - search:
+      lang:
+        - ru
+        - en
+
+markdown_extensions:
+  - pymdownx.snippets:
+      base_path:
+        - .
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - toc:
+      permalink: true
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Создание новой модели: quickstarts/create-new-model.md
+  - Привязка устройства: quickstarts/bind-and-provision.md
+  - История показаний: quickstarts/query-telemetry.md
+  - Подписка на события юнита: quickstarts/subscribe-events.md
+
+

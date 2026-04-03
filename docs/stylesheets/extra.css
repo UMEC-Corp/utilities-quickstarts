@@ -1,0 +1,4 @@
+/* Нижняя панель сайта (футер Material: соцссылки, служебные строки, навигация prev/next при navigation.footer) */
+.md-footer {
+  display: none;
+}
