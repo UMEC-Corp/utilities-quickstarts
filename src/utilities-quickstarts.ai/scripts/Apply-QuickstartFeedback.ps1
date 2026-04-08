@@ -66,7 +66,11 @@ try {
     else {
         Get-ConfluenceTicketPages -Ticket $Ticket
     }
-    Write-QuickstartLog -Message "Existing pages loaded: $($existingPages.Count)"
+    $existingPagesCount = @($existingPages).Count
+    if ($existingPagesCount -eq 0) {
+        throw "No existing quickstart pages were found for $Ticket. Run scripts/New-QuickstartsFromJira.ps1 first to create baseline pages."
+    }
+    Write-QuickstartLog -Message "Existing pages loaded: $existingPagesCount"
 
     $promptTemplate = Get-Content -LiteralPath $PromptTemplatePath -Raw
     $responseTemplate = Get-Content -LiteralPath $ResponseTemplatePath -Raw
@@ -90,6 +94,12 @@ try {
 }
 catch {
     Write-QuickstartLog -Level ERROR -Message $_.Exception.Message
+    if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+        Write-QuickstartLog -Level ERROR -Message ("Position: " + $_.InvocationInfo.PositionMessage)
+    }
+    if ($_.ScriptStackTrace) {
+        Write-QuickstartLog -Level ERROR -Message ("StackTrace:`n" + $_.ScriptStackTrace)
+    }
     exit 1
 }
 
