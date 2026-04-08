@@ -61,7 +61,6 @@ Output goes to the `site/` directory (it is gitignored).
 | `requirements.txt` | Python dependencies |
 | `docs/` | Markdown sources |
 | `docs/quickstarts/` | Scenario pages (Markdown) |
-| `scripts/` | Full Python and PowerShell scripts for the scenarios |
 | `docs/assets/` | Images and other static assets |
 
 ## Adding a page

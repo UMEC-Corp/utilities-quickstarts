@@ -35,9 +35,6 @@ plugins:
         - en
 
 markdown_extensions:
-  - pymdownx.snippets:
-      base_path:
-        - .
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
