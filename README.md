@@ -31,8 +31,8 @@ The static site is built with **MkDocs** and the **Material for MkDocs** theme, 
 ## Local development
 
 ```powershell
-python -m pip install -r requirements.txt
-python -m mkdocs serve
+python -m pip install -r src/utilities-quickstarts/requirements.txt
+python -m mkdocs serve -f src/utilities-quickstarts/mkdocs.yml
 ```
 
 Open the URL printed in the terminal (often `http://127.0.0.1:8000`).
@@ -40,34 +40,33 @@ Open the URL printed in the terminal (often `http://127.0.0.1:8000`).
 Build without running a server:
 
 ```powershell
-python -m mkdocs build --strict
+python -m mkdocs build --strict -f src/utilities-quickstarts/mkdocs.yml
 ```
 
 Output goes to the `site/` directory (it is gitignored).
 
 ## Publishing to GitHub Pages
 
-1. Create a GitHub repository and push this project.
-2. In `mkdocs.yml`, set real values for `site_url`, `repo_url`, and the `extra.social` link instead of `YOUR_GITHUB_USER`.
-3. In the repository: **Settings → Pages → Build and deployment** — set the source to **GitHub Actions**.
-4. After a push to `main` or `master`, the workflow `.github/workflows/deploy-pages.yml` builds and publishes the site.
+1. In `src/utilities-quickstarts/mkdocs.yml`, set real values for `site_url` and `repo_url`.
+2. In the repository: **Settings → Pages → Build and deployment** — set the source to **GitHub Actions**.
+3. After a push to `develop` with changes in `src/utilities-quickstarts/**`, the workflow `.github/workflows/deploy-pages.yml` builds and publishes the site.
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
 | `.github/workflows/deploy-pages.yml` | CI: build and deploy to Pages |
-| `mkdocs.yml` | MkDocs configuration and table of contents (`nav`) |
-| `requirements.txt` | Python dependencies |
-| `docs/` | Markdown sources |
-| `docs/quickstarts/` | Scenario pages (Markdown) |
-| `docs/assets/` | Images and other static assets |
+| `src/utilities-quickstarts/mkdocs.yml` | MkDocs configuration and table of contents (`nav`) |
+| `src/utilities-quickstarts/requirements.txt` | Python dependencies |
+| `src/utilities-quickstarts/docs/` | Markdown sources |
+| `src/utilities-quickstarts/docs/quickstarts/` | Scenario pages (Markdown) |
+| `src/utilities-quickstarts/docs/assets/` | Images and other static assets |
 
 ## Adding a page
 
-1. Add a file under `docs/…` (for example `docs/quickstarts/new-scenario.md`).
-2. Add an entry under `nav` in `mkdocs.yml`.
-3. Verify with `python -m mkdocs build --strict`.
+1. Add a file under `src/utilities-quickstarts/docs/…` (for example `src/utilities-quickstarts/docs/quickstarts/new-scenario.md`).
+2. Add an entry under `nav` in `src/utilities-quickstarts/mkdocs.yml`.
+3. Verify with `python -m mkdocs build --strict -f src/utilities-quickstarts/mkdocs.yml`.
 
 ## Links
 
