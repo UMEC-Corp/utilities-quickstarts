@@ -20,6 +20,9 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  DOCS_PROJECT_DIR: src/utilities-quickstarts
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,14 +34,14 @@ jobs:
           python-version: "3.x"
 
       - name: Install dependencies
-        run: pip install -r src/utilities-quickstarts/requirements.txt
+        run: pip install -r ${{ env.DOCS_PROJECT_DIR }}/requirements.txt
 
       - name: Build site
-        run: python -m mkdocs build --strict --config-file src/utilities-quickstarts/mkdocs.yml
+        run: python -m mkdocs build --strict --config-file ${{ env.DOCS_PROJECT_DIR }}/mkdocs.yml
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: ${{ env.DOCS_PROJECT_DIR }}/site
 
   deploy:
     needs: build
