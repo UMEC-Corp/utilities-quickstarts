@@ -3,6 +3,24 @@
 Ответ должен быть предоставлен срого в виде JSON по шаблону:
 @prompts/response-json-template.md
 
+Ограничение на чтение ЛОКАЛЬНЫХ файлов (repo allowlist):
+- Это ограничение применяется ТОЛЬКО к файловой системе репозитория.
+- Разрешено читать только:
+  - `src/utilities-quickstarts.ai/prompts/**`
+  - `src/utilities-quickstarts.ai/out/**`
+  - `src/utilities-quickstarts.ai/README.md`
+  - `src/utilities-quickstarts.ai/scripts/New-QuickstartsFromJira.ps1`
+- Запрещено читать локальные файлы вне этого списка, если пользователь явно не запросил иное.
+
+Внешние источники документации (URL) — РАЗРЕШЕНЫ И ОБЯЗАТЕЛЬНЫ:
+- `https://api.rumecdev.deviot.cloud/`
+- документация нужного микросервиса, найденная через портал
+- `https://ws.rumecdev.deviot.cloud/openrpc.json`
+
+Эндпоинты:
+- Вебсокеты: `https://ws.rumecdev.deviot.cloud/ws`
+- Identity: `https://http-identity.rumecdev.deviot.cloud`
+
 Перед генерацией quickstart ты ОБЯЗАН выполнить этап исследования документации.
 
 Обязательный порядок:
@@ -24,16 +42,12 @@
   - status: "need_clarification"
   - reason: "Не найдена/непрочитана/неполна документация нужного источника (microservice/OpenRPC)"
 
-Источники документации (не добавлять в Markdown):
-- Публичное API: `https://api.rumecdev.deviot.cloud` (для получения документации по определенному микросервису, необходимо перейти по ссылке, найти подходящую ссылку на документацию микросервис и перейти по ней).
-- OpenRPC (вебсокеты): `https://ws.rumecdev.deviot.cloud/openrpc.json`.
 
-Эндпоинты:
-- Вебсокеты: `https://ws.rumecdev.deviot.cloud/ws`
-- Identity: `https://http-identity.rumecdev.deviot.cloud`
-
-
-Кодировка и JSON:
+Важно:
+- Repo allowlist НЕ ограничивает чтение URL.
+- Если URL недоступны из среды выполнения/политик доступа, верни JSON:
+  - `status: "need_clarification"`
+  - `reason: "Не найдена/непрочитана/неполна документация нужного источника (microservice/OpenRPC)"`
 - Весь текст сценария и поле `body_markdown` в ответе — **UTF-8**; кириллица и символы в коде должны отображаться корректно.
 
 Запрещено:

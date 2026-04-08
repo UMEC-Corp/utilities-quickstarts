@@ -474,7 +474,6 @@ function ConvertFrom-AgentJsonOutput {
     )
 
     $candidate = $RawOutput.Trim()
-    $preview = (($RawOutput -split "`r?`n") | Select-Object -First 100) -join "`n"
     if ($candidate -match "(?m)^\{""type"":""result""") {
         $lines = $candidate -split "`r?`n"
         $resultPayload = $null
@@ -531,7 +530,7 @@ function ConvertFrom-AgentJsonOutput {
         $first = $candidate.IndexOf("{")
         $last = $candidate.LastIndexOf("}")
         if ($first -lt 0 -or $last -lt 0 -or $last -le $first) {
-            throw "Agent output does not contain valid JSON object. Output preview (first 100 lines):`n$preview"
+            throw "Agent output does not contain valid JSON object."
         }
 
         $jsonSlice = $candidate.Substring($first, $last - $first + 1)
@@ -539,15 +538,29 @@ function ConvertFrom-AgentJsonOutput {
             $obj = $jsonSlice | ConvertFrom-Json
         }
         catch {
-            throw "Failed to parse agent JSON output: $($_.Exception.Message)`nOutput preview (first 100 lines):`n$preview"
+            throw "Failed to parse agent JSON output: $($_.Exception.Message)"
         }
     }
 
-    if ($null -eq $obj.pages) {
+    if ($obj -isnot [psobject]) {
+        $objType = if ($null -eq $obj) { "<null>" } else { $obj.GetType().FullName }
+        throw "Agent JSON root must be an object, got: $objType."
+    }
+
+    $hasPages = ($obj.PSObject.Properties.Name -contains "pages")
+    if (-not $hasPages) {
         throw "Agent JSON misses 'pages' property."
     }
-    if ($null -eq $obj.last_changes_markdown) {
+    if ($null -eq $obj.pages) {
+        throw "Agent JSON property 'pages' is null."
+    }
+
+    $hasLastChanges = ($obj.PSObject.Properties.Name -contains "last_changes_markdown")
+    if (-not $hasLastChanges) {
         throw "Agent JSON misses 'last_changes_markdown' property."
+    }
+    if ($null -eq $obj.last_changes_markdown) {
+        throw "Agent JSON property 'last_changes_markdown' is null."
     }
 
     return $obj
@@ -602,6 +615,213 @@ function Resolve-ExecutablePath {
     }
 
     return $ExecutableName
+}
+
+function Test-QuickstartAiStreamDetailLog {
+    $v = Get-QuickstartEnv -Name "QUICKSTART_AI_STREAM_LOG" -DefaultValue "1"
+    $t = $v.Trim().ToLowerInvariant()
+    return $t -ne "0" -and $t -ne "off" -and $t -ne "false"
+}
+
+function Limit-QuickstartLogString {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [int]$MaxLength = 400
+    )
+
+    $oneLine = ($Text -replace "[\r\n]+", " ").Trim()
+    if ($oneLine.Length -le $MaxLength) {
+        return $oneLine
+    }
+    return $oneLine.Substring(0, $MaxLength) + "..."
+}
+
+function Get-QuickstartObjectProperty {
+    param(
+        # Not mandatory: nested JSON often omits objects (e.g. tool_call.started without args).
+        [AllowNull()]
+        $Object,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) {
+        return $null
+    }
+    return $prop.Value
+}
+
+function Get-AiToolCallKindSummary {
+    param($ToolCall)
+
+    if ($null -eq $ToolCall) {
+        return "tool"
+    }
+    $read = Get-QuickstartObjectProperty -Object $ToolCall -Name "readToolCall"
+    if ($null -ne $read) {
+        $args = Get-QuickstartObjectProperty -Object $read -Name "args"
+        $p = Get-QuickstartObjectProperty -Object $args -Name "path"
+        $pStr = if ([string]::IsNullOrWhiteSpace([string]$p)) { "(path n/a)" } else { [string]$p }
+        return "read $(Limit-QuickstartLogString -Text $pStr -MaxLength 200)"
+    }
+    $shell = Get-QuickstartObjectProperty -Object $ToolCall -Name "shellToolCall"
+    if ($null -ne $shell) {
+        $args = Get-QuickstartObjectProperty -Object $shell -Name "args"
+        $c = Get-QuickstartObjectProperty -Object $args -Name "command"
+        $cStr = if ([string]::IsNullOrWhiteSpace([string]$c)) { "(command n/a)" } else { [string]$c }
+        return "shell $(Limit-QuickstartLogString -Text $cStr -MaxLength 200)"
+    }
+    if ($null -ne (Get-QuickstartObjectProperty -Object $ToolCall -Name "webFetchToolCall")) {
+        return "webFetch"
+    }
+    $grep = Get-QuickstartObjectProperty -Object $ToolCall -Name "grepToolCall"
+    if ($null -ne $grep) {
+        $args = Get-QuickstartObjectProperty -Object $grep -Name "args"
+        $pat = Get-QuickstartObjectProperty -Object $args -Name "pattern"
+        $patStr = if ([string]::IsNullOrWhiteSpace([string]$pat)) { "(pattern n/a)" } else { [string]$pat }
+        return "grep $(Limit-QuickstartLogString -Text $patStr -MaxLength 120)"
+    }
+    $glob = Get-QuickstartObjectProperty -Object $ToolCall -Name "globToolCall"
+    if ($null -ne $glob) {
+        $args = Get-QuickstartObjectProperty -Object $glob -Name "args"
+        $g = Get-QuickstartObjectProperty -Object $args -Name "globPattern"
+        $gStr = if ([string]::IsNullOrWhiteSpace([string]$g)) { "(glob n/a)" } else { [string]$g }
+        return "glob $(Limit-QuickstartLogString -Text $gStr -MaxLength 120)"
+    }
+    return "tool"
+}
+
+function Write-AiStreamJsonLineLog {
+    param([Parameter(Mandatory = $true)][string]$Line)
+
+    $trim = $Line.Trim()
+    if ([string]::IsNullOrWhiteSpace($trim) -or -not $trim.StartsWith("{")) {
+        return
+    }
+
+    try {
+        $ev = $trim | ConvertFrom-Json
+    }
+    catch {
+        return
+    }
+
+    $type = [string](Get-QuickstartObjectProperty -Object $ev -Name "type")
+    $subtype = [string](Get-QuickstartObjectProperty -Object $ev -Name "subtype")
+
+    switch ($type) {
+        "thinking" {
+            $thinkText = Get-QuickstartObjectProperty -Object $ev -Name "text"
+            if ($subtype -eq "delta" -and -not [string]::IsNullOrWhiteSpace([string]$thinkText)) {
+                Write-QuickstartLog -Message "AI thinking: $(Limit-QuickstartLogString -Text ([string]$thinkText))"
+            }
+        }
+        "tool_call" {
+            $tc = Get-QuickstartObjectProperty -Object $ev -Name "tool_call"
+            $summary = Get-AiToolCallKindSummary -ToolCall $tc
+            if ($subtype -eq "started") {
+                Write-QuickstartLog -Message "AI tool -> $summary"
+            }
+            elseif ($subtype -eq "completed") {
+                $rej = $null
+                if ($null -ne $tc) {
+                    $shellTc = Get-QuickstartObjectProperty -Object $tc -Name "shellToolCall"
+                    if ($null -ne $shellTc) {
+                        $shellRes = Get-QuickstartObjectProperty -Object $shellTc -Name "result"
+                        $rej = Get-QuickstartObjectProperty -Object $shellRes -Name "rejected"
+                    }
+                    if ($null -eq $rej) {
+                        $webTc = Get-QuickstartObjectProperty -Object $tc -Name "webFetchToolCall"
+                        if ($null -ne $webTc) {
+                            $webRes = Get-QuickstartObjectProperty -Object $webTc -Name "result"
+                            $rej = Get-QuickstartObjectProperty -Object $webRes -Name "rejected"
+                        }
+                    }
+                }
+                if ($null -ne $rej) {
+                    $reason = [string](Get-QuickstartObjectProperty -Object $rej -Name "reason")
+                    if ([string]::IsNullOrWhiteSpace($reason)) {
+                        $reason = "rejected"
+                    }
+                    Write-QuickstartLog -Message "AI tool FAILED $summary - $reason" -Level WARN
+                }
+                else {
+                    $err = $null
+                    if ($null -ne $tc) {
+                        $readTc = Get-QuickstartObjectProperty -Object $tc -Name "readToolCall"
+                        if ($null -ne $readTc) {
+                            $readRes = Get-QuickstartObjectProperty -Object $readTc -Name "result"
+                            $readErr = Get-QuickstartObjectProperty -Object $readRes -Name "error"
+                            if ($null -ne $readErr) {
+                                $err = [string](Get-QuickstartObjectProperty -Object $readErr -Name "error")
+                            }
+                        }
+                        if ([string]::IsNullOrWhiteSpace($err)) {
+                            $globTc = Get-QuickstartObjectProperty -Object $tc -Name "globToolCall"
+                            if ($null -ne $globTc) {
+                                $globRes = Get-QuickstartObjectProperty -Object $globTc -Name "result"
+                                $globErr = Get-QuickstartObjectProperty -Object $globRes -Name "error"
+                                if ($null -ne $globErr) {
+                                    $err = [string](Get-QuickstartObjectProperty -Object $globErr -Name "error")
+                                }
+                            }
+                        }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($err)) {
+                        Write-QuickstartLog -Message "AI tool FAILED $summary - $err" -Level WARN
+                    }
+                }
+            }
+        }
+        "interaction_query" {
+            if ($subtype -eq "request") {
+                $qt = [string](Get-QuickstartObjectProperty -Object $ev -Name "query_type")
+                $extra = ""
+                try {
+                    $q = Get-QuickstartObjectProperty -Object $ev -Name "query"
+                    $wf = Get-QuickstartObjectProperty -Object $q -Name "webFetchRequestQuery"
+                    if ($null -ne $wf) {
+                        $wfArgs = Get-QuickstartObjectProperty -Object $wf -Name "args"
+                        $u = Get-QuickstartObjectProperty -Object $wfArgs -Name "url"
+                        if (-not [string]::IsNullOrWhiteSpace([string]$u)) {
+                            $extra = " url=$(Limit-QuickstartLogString -Text ([string]$u) -MaxLength 200)"
+                        }
+                    }
+                }
+                catch {
+                    # ignore
+                }
+                Write-QuickstartLog -Message "AI approval needed: $qt$extra"
+            }
+            elseif ($subtype -eq "response") {
+                try {
+                    $r = Get-QuickstartObjectProperty -Object $ev -Name "response"
+                    $wfr = Get-QuickstartObjectProperty -Object $r -Name "webFetchRequestResponse"
+                    $rej = Get-QuickstartObjectProperty -Object $wfr -Name "rejected"
+                    if ($null -ne $rej) {
+                        $reason = [string](Get-QuickstartObjectProperty -Object $rej -Name "reason")
+                        if ([string]::IsNullOrWhiteSpace($reason)) {
+                            $reason = "rejected"
+                        }
+                        Write-QuickstartLog -Message "AI web fetch: $reason" -Level WARN
+                    }
+                }
+                catch {
+                    # ignore
+                }
+            }
+        }
+        "result" {
+            $isErr = Get-QuickstartObjectProperty -Object $ev -Name "is_error"
+            if ($subtype -eq "success" -and $isErr -eq $true) {
+                Write-QuickstartLog -Message "AI finished with is_error=true" -Level WARN
+            }
+        }
+    }
 }
 
 function Invoke-AiAgent {
@@ -666,13 +886,18 @@ function Invoke-AiAgent {
         $outLines = New-Object System.Collections.Generic.List[string]
         $progressEvents = 0
         $lastProgressAt = Get-Date
+        $streamDetailLog = Test-QuickstartAiStreamDetailLog
 
         while (-not $process.StandardOutput.EndOfStream) {
             $line = $process.StandardOutput.ReadLine()
             if ($null -eq $line) { continue }
             $outLines.Add($line)
 
-            if ($line -match '"type":"assistant"' -or $line -match '"type":"stream_event"' -or $line -match '"type":"result"') {
+            if ($streamDetailLog) {
+                Write-AiStreamJsonLineLog -Line $line
+            }
+
+            if ($line -match '"type":"assistant"' -or $line -match '"type":"stream_event"' -or $line -match '"type":"result"' -or $line -match '"type":"thinking"' -or $line -match '"type":"tool_call"' -or $line -match '"type":"interaction_query"') {
                 $progressEvents++
             }
 

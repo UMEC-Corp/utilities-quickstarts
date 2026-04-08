@@ -82,6 +82,12 @@ try {
 }
 catch {
     Write-QuickstartLog -Level ERROR -Message $_.Exception.Message
+    if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+        Write-QuickstartLog -Level ERROR -Message ("Position: " + $_.InvocationInfo.PositionMessage)
+    }
+    if ($_.ScriptStackTrace) {
+        Write-QuickstartLog -Level ERROR -Message ("StackTrace:`n" + $_.ScriptStackTrace)
+    }
     exit 1
 }
 
