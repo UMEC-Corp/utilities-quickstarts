@@ -288,21 +288,57 @@ function Invoke-ConfluenceRequest {
         [object]$Body
     )
 
+    if (-not ("System.Net.Http.HttpClient" -as [type])) {
+        Add-Type -AssemblyName System.Net.Http
+    }
+
     $headers = Get-AtlassianAuthHeaders
     $url = Get-ConfluenceV2ApiUrl -PathAndQuery $PathAndQuery
 
+    # Invoke-RestMethod on Windows PowerShell 5.1 often decodes JSON as ANSI; Confluence returns UTF-8 → mojibake.
+    $methodMap = @{
+        "GET"    = [System.Net.Http.HttpMethod]::Get
+        "POST"   = [System.Net.Http.HttpMethod]::Post
+        "PUT"    = [System.Net.Http.HttpMethod]::Put
+        "DELETE" = [System.Net.Http.HttpMethod]::Delete
+    }
+
+    $client = $null
+    $response = $null
+    $request = $null
     try {
-        if ($null -eq $Body) {
-            return Invoke-RestMethod -Uri $url -Headers $headers -Method $Method -TimeoutSec 120
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromSeconds(120)
+        foreach ($key in $headers.Keys) {
+            [void]$client.DefaultRequestHeaders.TryAddWithoutValidation($key, [string]$headers[$key])
         }
 
-        $jsonBody = $Body | ConvertTo-Json -Depth 20
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        $jsonBytes = $utf8NoBom.GetBytes($jsonBody)
-        return Invoke-RestMethod -Uri $url -Headers $headers -Method $Method -Body $jsonBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 120
+        $request = New-Object System.Net.Http.HttpRequestMessage($methodMap[$Method], $url)
+        if ($null -ne $Body) {
+            $jsonBody = $Body | ConvertTo-Json -Depth 20
+            $utf8 = New-Object System.Text.UTF8Encoding($false)
+            $request.Content = New-Object System.Net.Http.StringContent($jsonBody, $utf8, "application/json")
+        }
+
+        $response = $client.SendAsync($request).GetAwaiter().GetResult()
+        $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) {
+            throw "HTTP $([int]$response.StatusCode): $text"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            return $null
+        }
+
+        return $text | ConvertFrom-Json
     }
     catch {
         throw "Confluence API request failed ($Method $PathAndQuery): $($_.Exception.Message)"
+    }
+    finally {
+        if ($null -ne $response) { $response.Dispose() }
+        if ($null -ne $request) { $request.Dispose() }
+        if ($null -ne $client) { $client.Dispose() }
     }
 }
 
@@ -1120,6 +1156,46 @@ function Get-ConfluenceTicketPages {
     }
 
     return $pages
+}
+
+function Get-SafeFileNameFromTitle {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Title
+    )
+
+    $t = $Title.Trim()
+    if ([string]::IsNullOrWhiteSpace($t)) {
+        return "_untitled"
+    }
+
+    return ($t -replace '[\\/:*?"<>|]', "_")
+}
+
+function Export-ConfluenceTicketPagesToMarkdown {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Ticket,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputRoot
+    )
+
+    $pages = Get-ConfluenceTicketPages -Ticket $Ticket
+    $ticketPath = Join-Path $OutputRoot $Ticket
+    if (-not (Test-Path -LiteralPath $ticketPath)) {
+        New-Item -Path $ticketPath -ItemType Directory -Force | Out-Null
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($page in $pages) {
+        $safeName = Get-SafeFileNameFromTitle -Title ([string]$page.title)
+        $path = Join-Path $ticketPath "$safeName.md"
+        [System.IO.File]::WriteAllText($path, [string]$page.body_markdown, $utf8NoBom)
+        Write-QuickstartLog -Message "Wrote $path"
+    }
+
+    return $pages.Count
 }
 
 function Get-LocalTicketPages {
