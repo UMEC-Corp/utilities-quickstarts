@@ -30,7 +30,7 @@
 .\scripts\New-QuickstartsFromJira.ps1 `
   -Ticket UMEC-1205 `
   -LocalOutputPath .\out `
-  -AiCommand "cursor-agent"
+  -AiCommand "cursor-agent -p --output-format stream-json --stream-partial-output --trust --approve-mcps --force"
 ```
 
 2) Применение фидбэка локально:
@@ -39,7 +39,7 @@
 .\scripts\Apply-QuickstartFeedback.ps1 `
   -Ticket UMEC-1205 `
   -LocalOutputPath .\out `
-  -AiCommand "cursor-agent"
+  -AiCommand "cursor-agent -p --output-format stream-json --stream-partial-output --trust --approve-mcps --force"
 ```
 
 3) Публикация в Confluence (если `-LocalOutputPath` не задан):
@@ -57,11 +57,10 @@
 ## Примечания
 
 - AI-ответ должен быть строго JSON по шаблону в `prompts/response-json-template.md`.
-- Базовый URL теперь единый для Jira и Confluence: `ATLASSIAN_BASE_URL`.
 - Для Confluence используется REST API v2 (folders/pages).
 - Если `AiCommand`/`AI_AGENT_COMMAND` указан без параметров (например, `claude` или `cursor-agent`), скрипт автоматически добавляет stream-флаги для прогресса.
-- Если команда передана уже с параметрами, скрипт отправляет ее как есть (без дописывания флагов).
-- Режим выбирается автоматически: если задан `-LocalOutputPath`, используется local; иначе публикация в Confluence.
+- Если команда передана уже с параметрами, скрипт отправляет ее как есть.
+- Если задан `-LocalOutputPath`, используется local-режим; иначе публикация в Confluence.
 - В local-режиме сохраняются:
   - `out/<Ticket>/*.md`
   - `out/<Ticket>/agent-response.json`
