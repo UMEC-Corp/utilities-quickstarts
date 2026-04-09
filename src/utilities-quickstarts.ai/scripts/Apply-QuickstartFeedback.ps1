@@ -81,6 +81,10 @@ try {
     $rawOutput = Invoke-AiAgent -AiCommand $resolvedAiCommand -Prompt $prompt
     $agentJson = ConvertFrom-AgentJsonOutput -RawOutput $rawOutput
 
+    if (($agentJson.PSObject.Properties.Name -contains "status") -and [string]$agentJson.status -eq "need_clarification") {
+        throw "AI returned need_clarification: $([string]$agentJson.reason)"
+    }
+
     if ($isLocalMode) {
         Save-RunArtifactsLocal -OutputRoot $LocalOutputPath -Ticket $Ticket -AgentJson $agentJson
         Write-QuickstartLog -Message "Saved updated artifacts to local path: $LocalOutputPath"

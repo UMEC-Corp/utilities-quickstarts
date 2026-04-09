@@ -32,22 +32,6 @@ $PromptTemplate
 Ниже фактические данные Jira для обработки:
 
 $jiraBlock
-
----
-Требуемая JSON-схема ответа:
-
-$ResponseTemplate
-
----
-Шаблон last changes:
-
-$LastChangesTemplate
-
-Важно:
-- Возвращай только JSON без комментариев вне JSON.
-- Заголовки страниц делай точными и человекочитаемыми.
-- Строго запрещено создавать любые файлы, скрипты, временные артефакты и директории.
-- Результат должен быть возвращён только как JSON в stdout.
 "@
 }
 
@@ -68,6 +52,10 @@ try {
 
     $rawOutput = Invoke-AiAgent -AiCommand $resolvedAiCommand -Prompt $prompt
     $agentJson = ConvertFrom-AgentJsonOutput -RawOutput $rawOutput
+
+    if (($agentJson.PSObject.Properties.Name -contains "status") -and [string]$agentJson.status -eq "need_clarification") {
+        throw "AI returned need_clarification: $([string]$agentJson.reason)"
+    }
 
     if ($isLocalMode) {
         Save-RunArtifactsLocal -OutputRoot $LocalOutputPath -Ticket $Ticket -AgentJson $agentJson

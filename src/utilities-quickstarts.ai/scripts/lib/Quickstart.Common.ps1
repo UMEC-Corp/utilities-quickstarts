@@ -126,6 +126,10 @@ function ConvertFrom-JiraAdfNode {
     }
 
     $nodeType = $Node.type
+    $children = @()
+    if ($Node.PSObject -and $Node.PSObject.Properties.Match("content").Count -gt 0 -and $null -ne $Node.content) {
+        $children = @($Node.content | Where-Object { $null -ne $_ })
+    }
     switch ($nodeType) {
         "text" {
             return [string]$Node.text
@@ -133,23 +137,46 @@ function ConvertFrom-JiraAdfNode {
         "hardBreak" {
             return "`n"
         }
+        "emoji" {
+            if ($Node.PSObject -and $Node.PSObject.Properties.Match("attrs").Count -gt 0 -and $Node.attrs) {
+                if ($Node.attrs.PSObject.Properties.Match("text").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$Node.attrs.text)) {
+                    return [string]$Node.attrs.text
+                }
+                if ($Node.attrs.PSObject.Properties.Match("shortName").Count -gt 0) {
+                    return [string]$Node.attrs.shortName
+                }
+            }
+            return ""
+        }
+        "mention" {
+            if ($Node.PSObject -and $Node.PSObject.Properties.Match("attrs").Count -gt 0 -and $Node.attrs -and $Node.attrs.PSObject.Properties.Match("text").Count -gt 0) {
+                return [string]$Node.attrs.text
+            }
+            return ""
+        }
+        "inlineCard" {
+            if ($Node.PSObject -and $Node.PSObject.Properties.Match("attrs").Count -gt 0 -and $Node.attrs -and $Node.attrs.PSObject.Properties.Match("url").Count -gt 0) {
+                return [string]$Node.attrs.url
+            }
+            return ""
+        }
         "paragraph" {
             $parts = @()
-            foreach ($child in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($child in $children) {
                 $parts += (ConvertFrom-JiraAdfNode -Node $child)
             }
             return (($parts -join "") + "`n")
         }
         "heading" {
             $parts = @()
-            foreach ($child in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($child in $children) {
                 $parts += (ConvertFrom-JiraAdfNode -Node $child)
             }
             return (($parts -join "") + "`n")
         }
         "bulletList" {
             $lines = @()
-            foreach ($item in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($item in $children) {
                 $itemText = ConvertFrom-JiraAdfNode -Node $item
                 if (-not [string]::IsNullOrWhiteSpace($itemText)) {
                     $lines += "- $($itemText.Trim())"
@@ -160,7 +187,7 @@ function ConvertFrom-JiraAdfNode {
         "orderedList" {
             $lines = @()
             $index = 1
-            foreach ($item in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($item in $children) {
                 $itemText = ConvertFrom-JiraAdfNode -Node $item
                 if (-not [string]::IsNullOrWhiteSpace($itemText)) {
                     $lines += "$index. $($itemText.Trim())"
@@ -171,14 +198,14 @@ function ConvertFrom-JiraAdfNode {
         }
         "listItem" {
             $parts = @()
-            foreach ($child in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($child in $children) {
                 $parts += (ConvertFrom-JiraAdfNode -Node $child).Trim()
             }
             return ($parts -join " ")
         }
         "codeBlock" {
             $parts = @()
-            foreach ($child in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($child in $children) {
                 $parts += (ConvertFrom-JiraAdfNode -Node $child)
             }
             $code = ($parts -join "").TrimEnd()
@@ -186,7 +213,7 @@ function ConvertFrom-JiraAdfNode {
         }
         default {
             $parts = @()
-            foreach ($child in ($Node.content | Where-Object { $null -ne $_ })) {
+            foreach ($child in $children) {
                 $parts += (ConvertFrom-JiraAdfNode -Node $child)
             }
             return ($parts -join "")
@@ -585,9 +612,18 @@ function ConvertFrom-AgentJsonOutput {
         throw "Agent JSON root must be an object, got: $objType."
     }
 
+    $hasStatus = ($obj.PSObject.Properties.Name -contains "status")
+    if ($hasStatus -and [string]$obj.status -eq "need_clarification") {
+        $hasReason = ($obj.PSObject.Properties.Name -contains "reason")
+        if (-not $hasReason -or [string]::IsNullOrWhiteSpace([string]$obj.reason)) {
+            throw "Agent JSON with status 'need_clarification' must contain non-empty 'reason'."
+        }
+        return $obj
+    }
+
     $hasPages = ($obj.PSObject.Properties.Name -contains "pages")
     if (-not $hasPages) {
-        throw "Agent JSON misses 'pages' property."
+        throw "Agent JSON must contain either pages/last_changes_markdown or status=need_clarification."
     }
     if ($null -eq $obj.pages) {
         throw "Agent JSON property 'pages' is null."
@@ -595,7 +631,7 @@ function ConvertFrom-AgentJsonOutput {
 
     $hasLastChanges = ($obj.PSObject.Properties.Name -contains "last_changes_markdown")
     if (-not $hasLastChanges) {
-        throw "Agent JSON misses 'last_changes_markdown' property."
+        throw "Agent JSON property 'last_changes_markdown' is required for successful response."
     }
     if ($null -eq $obj.last_changes_markdown) {
         throw "Agent JSON property 'last_changes_markdown' is null."
@@ -898,15 +934,26 @@ function Invoke-AiAgent {
     $isClaudeAgent = $exeNameLower -eq "claude"
     $isStreamingAgent = $isCursorAgent -or $isClaudeAgent
     $baseArgs = $parsed.args
+    $sendPromptViaStdIn = $false
     if ($exeExt -eq ".ps1") {
         $quotedScript = ConvertTo-WindowsCommandLineArgument -Value $resolvedExe
         $baseArgs = if ([string]::IsNullOrWhiteSpace($baseArgs)) { "-NoProfile -ExecutionPolicy Bypass -File $quotedScript" } else { "-NoProfile -ExecutionPolicy Bypass -File $quotedScript $baseArgs" }
     }
 
     if ($isStreamingAgent) {
-        $promptArg = ConvertTo-WindowsCommandLineArgument -Value $Prompt
-        $psi.Arguments = if ([string]::IsNullOrWhiteSpace($baseArgs)) { $promptArg } else { "$baseArgs $promptArg" }
-        $psi.RedirectStandardInput = $false
+        $commandLengthLimit = 30000
+        $baseArgsLength = if ($null -eq $baseArgs) { 0 } else { $baseArgs.Length }
+        if (($baseArgsLength + $Prompt.Length) -ge $commandLengthLimit) {
+            $sendPromptViaStdIn = $true
+            $psi.Arguments = $baseArgs
+            $psi.RedirectStandardInput = $true
+            Write-QuickstartLog -Message "Prompt is large; sending via stdin to avoid command line length limit."
+        }
+        else {
+            $promptArg = ConvertTo-WindowsCommandLineArgument -Value $Prompt
+            $psi.Arguments = if ([string]::IsNullOrWhiteSpace($baseArgs)) { $promptArg } else { "$baseArgs $promptArg" }
+            $psi.RedirectStandardInput = $false
+        }
     }
     else {
         $psi.Arguments = $baseArgs
@@ -921,6 +968,11 @@ function Invoke-AiAgent {
     $stdOut = ""
 
     if ($isStreamingAgent) {
+        if ($sendPromptViaStdIn) {
+            $process.StandardInput.WriteLine($Prompt)
+            $process.StandardInput.Close()
+        }
+
         $outLines = New-Object System.Collections.Generic.List[string]
         $progressEvents = 0
         $lastProgressAt = Get-Date
