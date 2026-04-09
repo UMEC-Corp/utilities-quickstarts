@@ -1,5 +1,8 @@
 Set-StrictMode -Version Latest
 
+$script:QuickstartLastStdOut = ""
+$script:QuickstartLastStdErr = ""
+
 function Write-QuickstartLog {
     param(
         [Parameter(Mandatory = $true)]
@@ -10,6 +13,39 @@ function Write-QuickstartLog {
 
     $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     Write-Host "[$timestamp][$Level] $Message"
+}
+
+function Get-QuickstartTextTail {
+    param(
+        [AllowEmptyString()][AllowNull()][string]$Text,
+        [int]$MaxLines = 100
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $lines = $Text -split "`r?`n"
+    if ($lines.Length -le $MaxLines) {
+        return ($lines -join "`n")
+    }
+
+    $tail = $lines[($lines.Length - $MaxLines)..($lines.Length - 1)]
+    return ($tail -join "`n")
+}
+
+function Write-QuickstartLastOutputTail {
+    param([int]$MaxLines = 100)
+
+    $stdoutTail = Get-QuickstartTextTail -Text ([string]$script:QuickstartLastStdOut) -MaxLines $MaxLines
+    if (-not [string]::IsNullOrWhiteSpace($stdoutTail)) {
+        Write-QuickstartLog -Level ERROR -Message ("Last stdout tail ($MaxLines lines max):`n" + $stdoutTail)
+    }
+
+    $stderrTail = Get-QuickstartTextTail -Text ([string]$script:QuickstartLastStdErr) -MaxLines $MaxLines
+    if (-not [string]::IsNullOrWhiteSpace($stderrTail)) {
+        Write-QuickstartLog -Level ERROR -Message ("Last stderr tail ($MaxLines lines max):`n" + $stderrTail)
+    }
 }
 
 function Get-QuickstartEnv {
@@ -234,7 +270,9 @@ function Invoke-ConfluenceRequest {
         }
 
         $jsonBody = $Body | ConvertTo-Json -Depth 20
-        return Invoke-RestMethod -Uri $url -Headers $headers -Method $Method -Body $jsonBody -ContentType "application/json" -TimeoutSec 120
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        $jsonBytes = $utf8NoBom.GetBytes($jsonBody)
+        return Invoke-RestMethod -Uri $url -Headers $headers -Method $Method -Body $jsonBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 120
     }
     catch {
         throw "Confluence API request failed ($Method $PathAndQuery): $($_.Exception.Message)"
@@ -922,6 +960,8 @@ function Invoke-AiAgent {
     }
 
     $stdErr = $stdErrTask.Result
+    $script:QuickstartLastStdOut = [string]$stdOut
+    $script:QuickstartLastStdErr = [string]$stdErr
 
     if ($process.ExitCode -ne 0) {
         throw "AI command failed with exit code $($process.ExitCode): $stdErr"

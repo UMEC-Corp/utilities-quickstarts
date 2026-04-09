@@ -94,6 +94,7 @@ try {
 }
 catch {
     Write-QuickstartLog -Level ERROR -Message $_.Exception.Message
+    Write-QuickstartLastOutputTail -MaxLines 100
     if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
         Write-QuickstartLog -Level ERROR -Message ("Position: " + $_.InvocationInfo.PositionMessage)
     }
