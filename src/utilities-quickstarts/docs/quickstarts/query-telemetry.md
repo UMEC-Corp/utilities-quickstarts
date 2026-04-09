@@ -1,191 +1,210 @@
-# Сценарий: история показаний
+**Сценарий: Запрос телеметрии**
 
 ## Цель
 
-Получить агрегированные значения по входам за период: `GET /api/customer/v1/units/{unitId}/ticks`.
+Получить агрегированные телеметрические значения по устройству
 
 ## Предусловия
 
-- Пользователь авторизован, получен `accessToken`
-- Выполнен сценарий [Привязка устройства](bind-and-provision.md), получен `unitId`.
-- В модели устройства есть сенсор с кодом **`temperature`** (или свой код — укажите в скрипте).
+- **Выполнен сценарий [Привязка устройства](bind-and-provision.md), получен `unitId`.**
+- Нужны учетные данные пользователя (`userName`, `password`)
+
 
 ## Шаги
 
-### 1. Найти `inputId`
+### 1. Авторизуйтесь как customer и получите `accessToken`.
 
 === "Python"
-
     ```python
     import requests
 
-    BASE = "https://api.rumecdev.deviot.cloud"
-    headers = {"Authorization": f"Bearer {access_token}"}
+    base_url = "https://api.umecdev.deviot.cloud"
 
-    d = requests.get(
-        f"{BASE}/api/customer/v1/units/{unit_id}",
+    signin = requests.post(
+        f"{base_url}/api/customer/v1/signin",
+        json={"userName": "customer_demo", "password": "change_me_password"},
+        timeout=30,
+    )
+    signin.raise_for_status()
+    access_token = signin.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {access_token}"}
+    ```
+
+=== "PowerShell"
+    ```powershell
+    $BaseUrl = "https://api.umecdev.deviot.cloud"
+
+    $SignInBody = @{ userName = "customer_demo"; password = "change_me_password" } | ConvertTo-Json
+    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType "application/json" -Body $SignInBody
+    $AccessToken = $SignIn.accessToken
+    $Headers = @{ Authorization = "Bearer $AccessToken" }
+    ```
+
+### 2. Получите `unitId` из списка устройств customer (`GET /api/customer/v1/units`).
+
+=== "Python"
+    ```python
+    units_resp = requests.get(f"{base_url}/api/customer/v1/units", headers=headers, timeout=30)
+    units_resp.raise_for_status()
+    units = units_resp.json().get("items", [])
+    if not units:
+        raise RuntimeError("У пользователя нет устройств")
+    unit_id = units[0]["unitId"]
+    ```
+
+=== "PowerShell"
+    ```powershell
+    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $Headers
+    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw "У пользователя нет устройств" }
+    $UnitId = $UnitsResp.items[0].unitId
+    ```
+
+### 3. Получите ID сенсоров (`inputIds`) из деталей устройства (`GET /api/customer/v1/units/{unitId}`), затем сформируйте список `inputIds` для запроса телеметрии.
+
+=== "Python"
+    ```python
+    unit_details = requests.get(
+        f"{base_url}/api/customer/v1/units/{unit_id}",
         headers=headers,
         timeout=30,
     )
-    d.raise_for_status()
-    temp = next(i for i in d.json()["inputs"] if i["code"] == "temperature")
-    input_id = temp["id"]
+    unit_details.raise_for_status()
+    inputs = unit_details.json().get("item", {}).get("inputs", [])
+    if not inputs:
+        raise RuntimeError("У устройства отсутствуют входы")
+    input_ids = [inputs[0]["id"]]
     ```
 
 === "PowerShell"
-
     ```powershell
-    $Base = "https://api.rumecdev.deviot.cloud"
-    $hdr = @{ Authorization = "Bearer $accessToken" }
-
-    $details = Invoke-RestMethod -Method Get -Uri "$Base/api/customer/v1/units/$unitId" -Headers $hdr
-    $tempInput = $details.inputs | Where-Object { $_.code -eq "temperature" }
-    $inputId = $tempInput.id
+    $UnitDetails = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId" -Headers $Headers
+    $Inputs = $UnitDetails.item.inputs
+    if (-not $Inputs -or $Inputs.Count -eq 0) { throw "У устройства отсутствуют входы" }
+    $InputIds = @($Inputs[0].id)
     ```
 
-### 2. Запрос тиков
-
-`begin` / `end` — Unix-секунды.
+### 4. Запросите телеметрию по `inputIds` через `GET /api/customer/v1/units/{unitId}/ticks`.
 
 === "Python"
-
     ```python
-    params = [
-        ("inputIds", input_id),
-        ("begin", 1719705600),
-        ("end", 1719792000),
-        ("timeFrame", 3600),
-    ]
-    t = requests.get(
-        f"{BASE}/api/customer/v1/units/{unit_id}/ticks",
+    params = {
+        "inputIds": input_ids,
+        "begin": 1710000000000,
+        "end": 1710086400000,
+        "timeFrame": 60,
+        "difference": False,
+    }
+
+    ticks = requests.get(
+        f"{base_url}/api/customer/v1/units/{unit_id}/ticks",
         headers=headers,
         params=params,
-        timeout=60,
+        timeout=30,
     )
-    t.raise_for_status()
-    rows = t.json()["items"]
+    ticks.raise_for_status()
+    print(ticks.json())
     ```
 
 === "PowerShell"
-
     ```powershell
-    $q = "inputIds=$inputId&begin=1719705600&end=1719792000&timeFrame=3600"
-    $ticks = Invoke-RestMethod -Method Get `
-        -Uri "$Base/api/customer/v1/units/${unitId}/ticks?$q" -Headers $hdr
-    $rows = $ticks.items
+    $Query = @(
+      "inputIds=$($InputIds[0])",
+      "begin=1710000000000",
+      "end=1710086400000",
+      "timeFrame=60",
+      "difference=false"
+    ) -join "&"
+
+    $Ticks = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId/ticks?$Query" -Headers $Headers
+    $Ticks | ConvertTo-Json -Depth 20
     ```
 
 ## Ожидаемый результат
 
-- В **`items`** — список **временных окон**: у каждой записи есть **`begin`** и **`end`** (границы окна в Unix-секундах) и **агрегаты показаний** за это окно — в частности **`meanValue`** (среднее) и **`firstValue`** (первое значение в окне). Остальные поля см. в OpenAPI в описании **`GetInputTicksResponseItem`**.
+- В `GetInputTicksResponse` в `items[]` возвращаются агрегаты (`firstValue`, `lastValue`, `minValue`, `maxValue`, `meanValue`) и временной диапазон (`begin`, `end`) по каждому `inputId`.
 
-## Итоговый скрипт сценария
+## Полный скрипт сценария
 
 === "Python"
-
     ```python
-    #!/usr/bin/env python3
-    
-    from __future__ import annotations
-    
-    import argparse
-    import json
-    import os
-    import sys
-    
-    try:
-        import requests
-    except ImportError:
-        print("Установите requests: pip install requests", file=sys.stderr)
-        sys.exit(1)
-    
-    
-    def main() -> int:
-        p = argparse.ArgumentParser(description="Карточка юнита и история тиков по входу.")
-        p.add_argument("--base", default=os.environ.get("UMEC_BASE", "https://api.rumecdev.deviot.cloud"))
-        p.add_argument("--access-token", default=os.environ.get("UMEC_ACCESS_TOKEN"))
-        p.add_argument("--unit-id", type=int, default=None)
-        p.add_argument("--input-code", default=os.environ.get("UMEC_INPUT_CODE", "temperature"))
-        p.add_argument("--begin", type=int, default=int(os.environ.get("UMEC_TICKS_BEGIN", "1719705600")))
-        p.add_argument("--end", type=int, default=int(os.environ.get("UMEC_TICKS_END", "1719792000")))
-        p.add_argument("--time-frame", type=int, default=int(os.environ.get("UMEC_TICKS_TIMEFRAME", "3600")))
-        args = p.parse_args()
-        if not args.access_token:
-            p.error("Укажите --access-token или UMEC_ACCESS_TOKEN.")
-        if args.unit_id is None and os.environ.get("UMEC_UNIT_ID"):
-            args.unit_id = int(os.environ["UMEC_UNIT_ID"])
-        if args.unit_id is None:
-            p.error("Укажите --unit-id или UMEC_UNIT_ID.")
-    
-        base = args.base.rstrip("/")
-        headers = {"Authorization": f"Bearer {args.access_token}"}
-    
-        # Шаг 1 — найти inputId: GET /units/{unitId}, выбор входа по code.
-        d = requests.get(f"{base}/api/customer/v1/units/{args.unit_id}", headers=headers, timeout=30)
-        d.raise_for_status()
-        inputs = d.json().get("inputs") or []
-        match = next((i for i in inputs if i.get("code") == args.input_code), None)
-        if not match:
-            print(json.dumps(inputs, indent=2, ensure_ascii=False))
-            p.error(f"Вход с code={args.input_code!r} не найден")
-    
-        input_id = match["id"]
-        print("inputId:", input_id)
-    
-        # Шаг 2 — история тиков: GET /units/{unitId}/ticks.
-        params = [
-            ("inputIds", input_id),
-            ("begin", args.begin),
-            ("end", args.end),
-            ("timeFrame", args.time_frame),
-        ]
-        t = requests.get(
-            f"{base}/api/customer/v1/units/{args.unit_id}/ticks",
-            headers=headers,
-            params=params,
-            timeout=60,
-        )
-        t.raise_for_status()
-        out = t.json()
-        print(json.dumps(out, indent=2, ensure_ascii=False))
-        return 0
-    
-    
-    if __name__ == "__main__":
-        raise SystemExit(main())
+    import requests
+
+    base_url = "https://api.umecdev.deviot.cloud"
+
+    # Шаг 1: авторизация customer
+    signin = requests.post(
+        f"{base_url}/api/customer/v1/signin",
+        json={"userName": "customer_demo", "password": "change_me_password"},
+        timeout=30,
+    )
+    signin.raise_for_status()
+    access_token = signin.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    # Шаг 2: получение unitId
+    units_resp = requests.get(f"{base_url}/api/customer/v1/units", headers=headers, timeout=30)
+    units_resp.raise_for_status()
+    units = units_resp.json().get("items", [])
+    if not units:
+        raise RuntimeError("У пользователя нет устройств")
+    unit_id = units[0]["unitId"]
+
+    # Шаг 3: получение inputIds
+    unit_details = requests.get(f"{base_url}/api/customer/v1/units/{unit_id}", headers=headers, timeout=30)
+    unit_details.raise_for_status()
+    inputs = unit_details.json().get("item", {}).get("inputs", [])
+    if not inputs:
+        raise RuntimeError("У устройства отсутствуют входы")
+    input_ids = [inputs[0]["id"]]
+
+    # Шаг 4: запрос телеметрии
+    params = {
+        "inputIds": input_ids,
+        "begin": 1710000000000,
+        "end": 1710086400000,
+        "timeFrame": 60,
+        "difference": False,
+    }
+    ticks = requests.get(
+        f"{base_url}/api/customer/v1/units/{unit_id}/ticks",
+        headers=headers,
+        params=params,
+        timeout=30,
+    )
+    ticks.raise_for_status()
+    print(ticks.json())
     ```
 
 === "PowerShell"
-
     ```powershell
-    param(
-        [string] $Base = $(if ($env:UMEC_BASE) { $env:UMEC_BASE } else { "https://api.rumecdev.deviot.cloud" }),
-        [Parameter(Mandatory)]
-        [string] $AccessToken,
-        [Parameter(Mandatory)]
-        [long] $UnitId,
-        [string] $InputCode = $(if ($env:UMEC_INPUT_CODE) { $env:UMEC_INPUT_CODE } else { "temperature" }),
-        [long] $Begin = $(if ($env:UMEC_TICKS_BEGIN) { [long]$env:UMEC_TICKS_BEGIN } else { 1719705600 }),
-        [long] $End = $(if ($env:UMEC_TICKS_END) { [long]$env:UMEC_TICKS_END } else { 1719792000 }),
-        [int] $TimeFrame = $(if ($env:UMEC_TICKS_TIMEFRAME) { [int]$env:UMEC_TICKS_TIMEFRAME } else { 3600 })
-    )
-    
-    $Base = $Base.TrimEnd("/")
-    $hdr = @{ Authorization = "Bearer $AccessToken" }
-    
-    # Шаг 1 — найти inputId: GET /units/{unitId}.
-    $details = Invoke-RestMethod -Method Get -Uri "$Base/api/customer/v1/units/$UnitId" -Headers $hdr
-    $inp = $details.inputs | Where-Object { $_.code -eq $InputCode } | Select-Object -First 1
-    if (-not $inp) {
-        $details.inputs | ConvertTo-Json -Depth 6
-        throw "Вход с code=$InputCode не найден"
-    }
-    
-    $inputId = $inp.id
-    Write-Host "inputId:" $inputId
-    
-    # Шаг 2 — GET /units/{unitId}/ticks.
-    $q = "inputIds=$inputId&begin=$Begin&end=$End&timeFrame=$TimeFrame"
-    $ticks = Invoke-RestMethod -Method Get -Uri "$Base/api/customer/v1/units/${UnitId}/ticks?$q" -Headers $hdr
-    $ticks | ConvertTo-Json -Depth 10
+    $BaseUrl = "https://api.umecdev.deviot.cloud"
+
+    # Шаг 1: авторизация customer
+    $SignInBody = @{ userName = "customer_demo"; password = "change_me_password" } | ConvertTo-Json
+    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType "application/json" -Body $SignInBody
+    $AccessToken = $SignIn.accessToken
+    $Headers = @{ Authorization = "Bearer $AccessToken" }
+
+    # Шаг 2: получение unitId
+    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $Headers
+    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw "У пользователя нет устройств" }
+    $UnitId = $UnitsResp.items[0].unitId
+
+    # Шаг 3: получение inputIds
+    $UnitDetails = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId" -Headers $Headers
+    $Inputs = $UnitDetails.item.inputs
+    if (-not $Inputs -or $Inputs.Count -eq 0) { throw "У устройства отсутствуют входы" }
+    $InputIds = @($Inputs[0].id)
+
+    # Шаг 4: запрос телеметрии
+    $Query = @(
+      "inputIds=$($InputIds[0])",
+      "begin=1710000000000",
+      "end=1710086400000",
+      "timeFrame=60",
+      "difference=false"
+    ) -join "&"
+
+    $Ticks = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId/ticks?$Query" -Headers $Headers
+    $Ticks | ConvertTo-Json -Depth 20
     ```

@@ -1,282 +1,501 @@
-# Сценарий: привязка устройства
+﻿**Сценарий: Привязка устройства**
 
 ## Цель
 
-Войти под пользователем, **привязать устройство** и получить **`unitId`**.
+Привязать устройство к пользователю через `device_code`/`user_code`, проверить привязку и получить токен устройства.
 
 ## Предусловия
 
-- Учётная запись пользователя.
-- Выполнен сценарий [Создание новой модели устройства](create-new-model.md), получены `vendorCode`, `modelCode`, `firmwareVersion`, `hardwareVersion`.
-- Серийный номер, **user code**
+- **Выполнен сценарий [Создание новой модели](new-model.md), получены `vendorCode`, `modelCode`, `firmwareVersion`, `hardwareVersion`.**
+- Доступны учетные данные customer-пользователя: `UMEC_CUSTOMER_USER`, `UMEC_CUSTOMER_PASSWORD`.
+- Доступны параметры устройства: `UMEC_DEVICE_SERIAL`, `UMEC_DEVICE_MAC`.
 
 ## Шаги
 
-### 1. Вход
+### 1. Авторизоваться как customer и получить `accessToken` (`POST /api/customer/v1/signin`).
 
 === "Python"
+    ```python
+    import os
+    import requests
 
+    base_url = "https://api.umecdev.deviot.cloud"
+    user_name = os.environ["UMEC_CUSTOMER_USER"]
+    password = os.environ["UMEC_CUSTOMER_PASSWORD"]
+
+    signin = requests.post(
+        f"{base_url}/api/customer/v1/signin",
+        json={"userName": user_name, "password": password},
+        timeout=30,
+    )
+    signin.raise_for_status()
+    customer_access_token = signin.json()["accessToken"]
+    print("customer_access_token acquired:", bool(customer_access_token))
+    ```
+
+=== "PowerShell"
+    ```powershell
+    $BaseUrl = 'https://api.umecdev.deviot.cloud'
+    $UserName = $env:UMEC_CUSTOMER_USER
+    $Password = $env:UMEC_CUSTOMER_PASSWORD
+    if (-not $UserName -or -not $Password) { throw 'Не заданы UMEC_CUSTOMER_USER/UMEC_CUSTOMER_PASSWORD' }
+
+    $SignInBody = @{ userName = $UserName; password = $Password } | ConvertTo-Json
+    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType 'application/json' -Body $SignInBody
+    $CustomerAccessToken = $SignIn.accessToken
+    "customer_access_token acquired: $([bool]$CustomerAccessToken)"
+    ```
+
+### 2. Получить `device_code`, `user_code`, `verification_uri`, `verification_uri_complete` в Identity (`POST /connect/deviceauthorization`).
+
+=== "Python"
     ```python
     import requests
 
-    BASE = "https://api.rumecdev.deviot.cloud"
-    r = requests.post(
-        f"{BASE}/api/customer/v1/signin",
-        json={"userName": "<логин>", "password": "<пароль>"},
-        headers={"Content-Type": "application/json"},
+    device_authorization_endpoint = "https://http-identity.umecdev.deviot.cloud/connect/deviceauthorization"
+
+    device_auth = requests.post(
+        device_authorization_endpoint,
+        data={"client_id": "controller"},
         timeout=30,
     )
-    r.raise_for_status()
-    data = r.json()
-    access_token = data["accessToken"]
-    refresh_token = data["refreshToken"]
+    device_auth.raise_for_status()
+    device_data = device_auth.json()
+
+    device_code = device_data["device_code"]
+    user_code = device_data["user_code"]
+    verification_uri = device_data["verification_uri"]
+    verification_uri_complete = device_data["verification_uri_complete"]
+    poll_interval = int(device_data.get("interval", 5))
+
+    print("Open:", verification_uri_complete)
+    print("User code:", user_code)
     ```
 
 === "PowerShell"
-
     ```powershell
-    $Base = "https://api.rumecdev.deviot.cloud"
-    $login = @{ userName = "<логин>"; password = "<пароль>" } | ConvertTo-Json
+    $DeviceAuthorizationEndpoint = 'https://http-identity.umecdev.deviot.cloud/connect/deviceauthorization'
 
-    $auth = Invoke-RestMethod -Method Post -Uri "$Base/api/customer/v1/signin" `
-        -ContentType "application/json" -Body $login
-    $accessToken = $auth.accessToken
-    $refreshToken = $auth.refreshToken
+    $DeviceAuth = Invoke-RestMethod -Method Post -Uri $DeviceAuthorizationEndpoint -ContentType 'application/x-www-form-urlencoded' -Body @{ client_id = 'controller' }
+    $DeviceCode = $DeviceAuth.device_code
+    $UserCode = $DeviceAuth.user_code
+    $VerificationUri = $DeviceAuth.verification_uri
+    $VerificationUriComplete = $DeviceAuth.verification_uri_complete
+    $PollInterval = [int]($DeviceAuth.interval)
+    if (-not $PollInterval -or $PollInterval -le 0) { $PollInterval = 5 }
+
+    "Open: $VerificationUriComplete"
+    "User code: $UserCode"
     ```
 
-### 2. Привязка
+### 3. Выполнить привязку устройства (`POST /api/customer/v1/units/bind`).
 
 === "Python"
-
     ```python
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
-    bind = requests.post(
-        f"{BASE}/api/customer/v1/units/bind",
-        json={
-            "deviceSerial": "SN-ACME-00042",
-            "userCode": "<код_с_устройства>",
-            "firmware": {
-                "vendorCode": "ACME_LABS",
-                "modelCode": "ACME_TEMP_V1",
-                "firmwareVersion": "1.0.0",
-                "hardwareVersion": "1.0",
-            },
-            "location": {"latitude": 55.7558, "longitude": 37.6173},
+    import os
+    import requests
+
+    base_url = "https://api.umecdev.deviot.cloud"
+    customer_access_token = "<полученный_на_шаге_1_token>"
+    user_code = "<полученный_на_шаге_2_user_code>"
+    verification_uri = "<полученный_на_шаге_2_verification_uri>"
+
+    headers = {"Authorization": f"Bearer {customer_access_token}"}
+    bind_payload = {
+        "deviceSerial": os.environ["UMEC_DEVICE_SERIAL"],
+        "userCode": user_code,
+        "verificationUrl": verification_uri,
+        "firmware": {
+            "vendorCode": os.environ["UMEC_VENDOR_CODE"],
+            "modelCode": os.environ["UMEC_MODEL_CODE"],
+            "firmwareVersion": os.environ["UMEC_FIRMWARE_VERSION"],
+            "hardwareVersion": os.environ["UMEC_HARDWARE_VERSION"],
         },
+        "deviceMacAddress": os.environ["UMEC_DEVICE_MAC"],
+        "location": {
+            "latitude": 55.7558,
+            "longitude": 37.6173,
+        },
+    }
+
+    bind_resp = requests.post(
+        f"{base_url}/api/customer/v1/units/bind",
         headers=headers,
-        timeout=60,
-    )
-    bind.raise_for_status()
-    unit_id = bind.json()["items"][0]["unitId"]
-    ```
-
-=== "PowerShell"
-
-    ```powershell
-    $hdr = @{ Authorization = "Bearer $accessToken" }
-    $bindBody = @{
-        deviceSerial = "SN-ACME-00042"
-        userCode     = "<код_с_устройства>"
-        firmware     = @{
-            vendorCode       = "ACME_LABS"
-            modelCode        = "ACME_TEMP_V1"
-            firmwareVersion  = "1.0.0"
-            hardwareVersion  = "1.0"
-        }
-        location = @{ latitude = 55.7558; longitude = 37.6173 }
-    } | ConvertTo-Json -Depth 6
-
-    $bind = Invoke-RestMethod -Method Post -Uri "$Base/api/customer/v1/units/bind" `
-        -Headers $hdr -ContentType "application/json" -Body $bindBody
-    $unitId = $bind.items[0].unitId
-    ```
-
-### 3. Обновление access-токена
-
-=== "Python"
-
-    ```python
-    r = requests.post(
-        f"{BASE}/api/customer/v1/refresh",
-        json={"refreshToken": refresh_token},
-        headers={"Content-Type": "application/json"},
+        json=bind_payload,
         timeout=30,
     )
-    r.raise_for_status()
-    access_token = r.json()["accessToken"]
+    bind_resp.raise_for_status()
+    bind_items = bind_resp.json().get("items", [])
+    if not bind_items:
+        raise RuntimeError("Bind выполнен без items в ответе")
+    bound_unit_ids = [item["unitId"] for item in bind_items if "unitId" in item]
+    if not bound_unit_ids:
+        raise RuntimeError("В ответе bind отсутствуют unitId")
+    print("bound unitIds:", bound_unit_ids)
     ```
 
 === "PowerShell"
-
     ```powershell
-    $refBody = @{ refreshToken = $refreshToken } | ConvertTo-Json
-    $auth = Invoke-RestMethod -Method Post -Uri "$Base/api/customer/v1/refresh" `
-        -ContentType "application/json" -Body $refBody
-    $accessToken = $auth.accessToken
+    $BaseUrl = 'https://api.umecdev.deviot.cloud'
+    $CustomerAccessToken = '<полученный_на_шаге_1_token>'
+    $UserCode = '<полученный_на_шаге_2_user_code>'
+    $VerificationUri = '<полученный_на_шаге_2_verification_uri>'
+
+    $DeviceSerial = $env:UMEC_DEVICE_SERIAL
+    $VendorCode = $env:UMEC_VENDOR_CODE
+    $ModelCode = $env:UMEC_MODEL_CODE
+    $FirmwareVersion = $env:UMEC_FIRMWARE_VERSION
+    $HardwareVersion = $env:UMEC_HARDWARE_VERSION
+    $DeviceMac = $env:UMEC_DEVICE_MAC
+    if (-not $DeviceSerial -or -not $VendorCode -or -not $ModelCode -or -not $FirmwareVersion -or -not $HardwareVersion -or -not $DeviceMac) {
+      throw 'Не заданы UMEC_DEVICE_SERIAL/UMEC_VENDOR_CODE/UMEC_MODEL_CODE/UMEC_FIRMWARE_VERSION/UMEC_HARDWARE_VERSION/UMEC_DEVICE_MAC'
+    }
+
+    $Headers = @{ Authorization = "Bearer $CustomerAccessToken" }
+    $BindBody = @{
+      deviceSerial = $DeviceSerial
+      userCode = $UserCode
+      verificationUrl = $VerificationUri
+      firmware = @{
+        vendorCode = $VendorCode
+        modelCode = $ModelCode
+        firmwareVersion = $FirmwareVersion
+        hardwareVersion = $HardwareVersion
+      }
+      deviceMacAddress = $DeviceMac
+      location = @{ latitude = 55.7558; longitude = 37.6173 }
+    } | ConvertTo-Json -Depth 10
+
+    $BindResp = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/units/bind" -Headers $Headers -ContentType 'application/json' -Body $BindBody
+    if (-not $BindResp.items -or $BindResp.items.Count -eq 0) { throw 'Bind выполнен без items в ответе' }
+    $BoundUnitIds = @($BindResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
+    if (-not $BoundUnitIds -or $BoundUnitIds.Count -eq 0) { throw 'В ответе bind отсутствуют unitId' }
+    "bound unitIds: $($BoundUnitIds -join ', ')"
+    ```
+
+### 4. Проверить наличие привязанного устройства: получить список устройств и убедиться, что в нем присутствует хотя бы один `unitId` из ответа bind.
+
+=== "Python"
+    ```python
+    import requests
+
+    base_url = "https://api.umecdev.deviot.cloud"
+    customer_access_token = "<полученный_на_шаге_1_token>"
+    bound_unit_ids = [12345]  # unitId из шага 3
+
+    headers = {"Authorization": f"Bearer {customer_access_token}"}
+    units_resp = requests.get(f"{base_url}/api/customer/v1/units", headers=headers, timeout=30)
+    units_resp.raise_for_status()
+    items = units_resp.json().get("items", [])
+    if not items:
+        raise RuntimeError("Список units пуст после bind")
+
+    actual_unit_ids = {item["unitId"] for item in items if "unitId" in item}
+    if not any(unit_id in actual_unit_ids for unit_id in bound_unit_ids):
+        raise RuntimeError("Привязанное устройство не найдено в GET /api/customer/v1/units")
+
+    print("bind verification passed")
+    ```
+
+=== "PowerShell"
+    ```powershell
+    $BaseUrl = 'https://api.umecdev.deviot.cloud'
+    $CustomerAccessToken = '<полученный_на_шаге_1_token>'
+    $BoundUnitIds = @(12345) # unitId из шага 3
+
+    $Headers = @{ Authorization = "Bearer $CustomerAccessToken" }
+    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $Headers
+    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw 'Список units пуст после bind' }
+
+    $ActualUnitIds = @($UnitsResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
+    $HasBoundUnit = $false
+    foreach ($id in $BoundUnitIds) {
+      if ($ActualUnitIds -contains $id) { $HasBoundUnit = $true; break }
+    }
+    if (-not $HasBoundUnit) { throw 'Привязанное устройство не найдено в GET /api/customer/v1/units' }
+
+    "bind verification passed"
+    ```
+
+### 5. Получить device token в Identity (`POST /connect/token`).
+
+=== "Python"
+    ```python
+    import os
+    import time
+    import requests
+
+    token_endpoint = "https://http-identity.umecdev.deviot.cloud/connect/token"
+    device_code = "<полученный_на_шаге_2_device_code>"
+    client_id = "controller"
+    poll_interval = 5
+
+    service_device_access_token = None
+    for _ in range(120):
+        token_resp = requests.post(
+            token_endpoint,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": client_id,
+            },
+            timeout=30,
+        )
+        payload = token_resp.json()
+
+        if token_resp.status_code == 200 and "access_token" in payload:
+            service_device_access_token = payload["access_token"]
+            break
+
+        if payload.get("error") == "authorization_pending":
+            time.sleep(poll_interval)
+            continue
+
+        if payload.get("error") == "slow_down":
+            poll_interval += 5
+            time.sleep(poll_interval)
+            continue
+
+        raise RuntimeError(payload)
+
+    if not service_device_access_token:
+        raise RuntimeError("Не удалось получить device token за отведенное время")
+
+    print("device token acquired:", bool(service_device_access_token))
+    ```
+
+=== "PowerShell"
+    ```powershell
+    $TokenEndpoint = 'https://http-identity.umecdev.deviot.cloud/connect/token'
+    $DeviceCode = '<полученный_на_шаге_2_device_code>'
+    $ClientId = 'controller'
+
+    $PollInterval = 5
+    $ServiceDeviceAccessToken = $null
+
+    for ($i = 0; $i -lt 120; $i++) {
+      try {
+        $TokenResp = Invoke-RestMethod -Method Post -Uri $TokenEndpoint -ContentType 'application/x-www-form-urlencoded' -Body @{
+          grant_type = 'urn:ietf:params:oauth:grant-type:device_code'
+          device_code = $DeviceCode
+          client_id = $ClientId
+        }
+
+        if ($TokenResp.access_token) {
+          $ServiceDeviceAccessToken = $TokenResp.access_token
+          break
+        }
+      }
+      catch {
+        $ErrPayload = $_.ErrorDetails.Message | ConvertFrom-Json
+        if ($ErrPayload.error -eq 'authorization_pending') { Start-Sleep -Seconds $PollInterval; continue }
+        if ($ErrPayload.error -eq 'slow_down') { $PollInterval += 5; Start-Sleep -Seconds $PollInterval; continue }
+        throw
+      }
+    }
+
+    if (-not $ServiceDeviceAccessToken) { throw 'Не удалось получить device token за отведенное время' }
+    "device token acquired: $([bool]$ServiceDeviceAccessToken)"
     ```
 
 ## Ожидаемый результат
 
-- `accessToken`, `refreshToken`, `unitId` (или несколько из `items`).
+- Привязка успешно выполнена, в ответе получены `items` с `unitId`.
+- В результате проверки найдено хотя бы одно устройство с `unitId` из ответа bind.
+- Получен токен устройства.
 
-## Итоговый скрипт сценария
+## Полный скрипт сценария
 
 === "Python"
-
     ```python
-    #!/usr/bin/env python3
-    
-    from __future__ import annotations
-    
-    import argparse
-    import json
     import os
-    import sys
-    
-    try:
-        import requests
-    except ImportError:
-        print("Установите requests: pip install requests", file=sys.stderr)
-        sys.exit(1)
-    
-    
-    def main() -> int:
-        p = argparse.ArgumentParser(description="Вход, привязка устройства (units/bind), опционально refresh.")
-        p.add_argument("--base", default=os.environ.get("UMEC_BASE", "https://api.rumecdev.deviot.cloud"))
-        p.add_argument("--user", default=os.environ.get("UMEC_CUSTOMER_USER"))
-        p.add_argument("--password", default=os.environ.get("UMEC_CUSTOMER_PASSWORD"))
-        p.add_argument("--device-serial", default=os.environ.get("UMEC_DEVICE_SERIAL", "SN-ACME-00042"))
-        p.add_argument("--user-code", default=os.environ.get("UMEC_DEVICE_USER_CODE"), required=True)
-        p.add_argument("--vendor-code", default=os.environ.get("UMEC_VENDOR_CODE", "ACME_LABS"))
-        p.add_argument("--model-code", default=os.environ.get("UMEC_MODEL_CODE", "ACME_TEMP_V1"))
-        p.add_argument("--firmware-version", default="1.0.0")
-        p.add_argument("--hardware-version", default="1.0")
-        p.add_argument("--lat", type=float, default=55.7558)
-        p.add_argument("--lon", type=float, default=37.6173)
-        p.add_argument("--refresh", action="store_true", help="После bind вызвать POST /refresh и показать новый accessToken")
-        args = p.parse_args()
-        if not args.user or not args.password:
-            p.error("Задайте --user и --password или UMEC_CUSTOMER_USER / UMEC_CUSTOMER_PASSWORD.")
-    
-        base = args.base.rstrip("/")
-        # Шаг 1 — вход: POST /signin.
-        r = requests.post(
-            f"{base}/api/customer/v1/signin",
-            json={"userName": args.user, "password": args.password},
-            headers={"Content-Type": "application/json"},
+    import time
+    import requests
+
+    base_url = "https://api.umecdev.deviot.cloud"
+    identity_base = "https://http-identity.umecdev.deviot.cloud"
+
+    # Шаг 1: авторизация customer
+    user_name = os.environ["UMEC_CUSTOMER_USER"]
+    password = os.environ["UMEC_CUSTOMER_PASSWORD"]
+    signin = requests.post(
+        f"{base_url}/api/customer/v1/signin",
+        json={"userName": user_name, "password": password},
+        timeout=30,
+    )
+    signin.raise_for_status()
+    customer_access_token = signin.json()["accessToken"]
+    customer_headers = {"Authorization": f"Bearer {customer_access_token}"}
+
+    # Шаг 2: получение device_code/user_code
+    device_auth = requests.post(
+        f"{identity_base}/connect/deviceauthorization",
+        data={"client_id": "controller"},
+        timeout=30,
+    )
+    device_auth.raise_for_status()
+    device_data = device_auth.json()
+    device_code = device_data["device_code"]
+    user_code = device_data["user_code"]
+    verification_uri = device_data["verification_uri"]
+    poll_interval = int(device_data.get("interval", 5))
+
+    # Шаг 3: bind устройства
+    bind_payload = {
+        "deviceSerial": os.environ["UMEC_DEVICE_SERIAL"],
+        "userCode": user_code,
+        "verificationUrl": verification_uri,
+        "firmware": {
+            "vendorCode": os.environ["UMEC_VENDOR_CODE"],
+            "modelCode": os.environ["UMEC_MODEL_CODE"],
+            "firmwareVersion": os.environ["UMEC_FIRMWARE_VERSION"],
+            "hardwareVersion": os.environ["UMEC_HARDWARE_VERSION"],
+        },
+        "deviceMacAddress": os.environ["UMEC_DEVICE_MAC"],
+        "location": {"latitude": 55.7558, "longitude": 37.6173},
+    }
+    bind_resp = requests.post(
+        f"{base_url}/api/customer/v1/units/bind",
+        headers=customer_headers,
+        json=bind_payload,
+        timeout=30,
+    )
+    bind_resp.raise_for_status()
+    bind_items = bind_resp.json().get("items", [])
+    if not bind_items:
+        raise RuntimeError("Bind выполнен без items в ответе")
+    bound_unit_ids = [item["unitId"] for item in bind_items if "unitId" in item]
+    if not bound_unit_ids:
+        raise RuntimeError("В ответе bind отсутствуют unitId")
+
+    # Шаг 4: проверка, что привязанное устройство присутствует в профиле
+    units_resp = requests.get(f"{base_url}/api/customer/v1/units", headers=customer_headers, timeout=30)
+    units_resp.raise_for_status()
+    units = units_resp.json().get("items", [])
+    if not units:
+        raise RuntimeError("Список units пуст после bind")
+    actual_unit_ids = {item["unitId"] for item in units if "unitId" in item}
+    if not any(unit_id in actual_unit_ids for unit_id in bound_unit_ids):
+        raise RuntimeError("Привязанное устройство не найдено в GET /api/customer/v1/units")
+
+    # Шаг 5: получение device token
+    service_device_access_token = None
+    for _ in range(120):
+        token_resp = requests.post(
+            f"{identity_base}/connect/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": "controller",
+            },
             timeout=30,
         )
-        r.raise_for_status()
-        auth = r.json()
-        access = auth["accessToken"]
-        refresh = auth["refreshToken"]
-        print("signin: OK")
-    
-        headers = {"Authorization": f"Bearer {access}", "Content-Type": "application/json"}
-        # Шаг 2 — привязка: POST /units/bind.
-        bind = requests.post(
-            f"{base}/api/customer/v1/units/bind",
-            json={
-                "deviceSerial": args.device_serial,
-                "userCode": args.user_code,
-                "firmware": {
-                    "vendorCode": args.vendor_code,
-                    "modelCode": args.model_code,
-                    "firmwareVersion": args.firmware_version,
-                    "hardwareVersion": args.hardware_version,
-                },
-                "location": {"latitude": args.lat, "longitude": args.lon},
-            },
-            headers=headers,
-            timeout=60,
-        )
-        bind.raise_for_status()
-        data = bind.json()
-        items = data.get("items") or []
-        if not items:
-            print(json.dumps(data, indent=2, ensure_ascii=False))
-            return 1
-        unit_id = items[0]["unitId"]
-        print("bind: OK")
-        print("unitId:", unit_id)
-        print("accessToken:", access[:24] + "…")
-        print("refreshToken:", refresh[:24] + "…")
-    
-        # Шаг 3 — обновить access-токен (опционально): POST /refresh.
-        if args.refresh:
-            rr = requests.post(
-                f"{base}/api/customer/v1/refresh",
-                json={"refreshToken": refresh},
-                headers={"Content-Type": "application/json"},
-                timeout=30,
-            )
-            rr.raise_for_status()
-            access2 = rr.json()["accessToken"]
-            print("refresh: OK, accessToken:", access2[:24] + "…")
-    
-        return 0
-    
-    
-    if __name__ == "__main__":
-        raise SystemExit(main())
+        payload = token_resp.json()
+        if token_resp.status_code == 200 and "access_token" in payload:
+            service_device_access_token = payload["access_token"]
+            break
+        if payload.get("error") == "authorization_pending":
+            time.sleep(poll_interval)
+            continue
+        if payload.get("error") == "slow_down":
+            poll_interval += 5
+            time.sleep(poll_interval)
+            continue
+        raise RuntimeError(payload)
+
+    if not service_device_access_token:
+        raise RuntimeError("Не удалось получить device token за отведенное время")
+
+    print("device token acquired:", bool(service_device_access_token))
     ```
 
 === "PowerShell"
-
     ```powershell
-    param(
-        [string] $Base = $(if ($env:UMEC_BASE) { $env:UMEC_BASE } else { "https://api.rumecdev.deviot.cloud" }),
-        [Parameter(Mandatory)]
-        [string] $User,
-        [Parameter(Mandatory)]
-        [string] $Password,
-        [string] $DeviceSerial = $(if ($env:UMEC_DEVICE_SERIAL) { $env:UMEC_DEVICE_SERIAL } else { "SN-ACME-00042" }),
-        [Parameter(Mandatory)]
-        [string] $UserCode,
-        [string] $VendorCode = $(if ($env:UMEC_VENDOR_CODE) { $env:UMEC_VENDOR_CODE } else { "ACME_LABS" }),
-        [string] $ModelCode = $(if ($env:UMEC_MODEL_CODE) { $env:UMEC_MODEL_CODE } else { "ACME_TEMP_V1" }),
-        [string] $FirmwareVersion = "1.0.0",
-        [string] $HardwareVersion = "1.0",
-        [double] $Lat = 55.7558,
-        [double] $Lon = 37.6173,
-        [switch] $DoRefresh
-    )
-    
-    $Base = $Base.TrimEnd("/")
-    # Шаг 1 — вход: POST /signin.
-    $login = @{ userName = $User; password = $Password } | ConvertTo-Json
-    $auth = Invoke-RestMethod -Method Post -Uri "$Base/api/customer/v1/signin" -ContentType "application/json" -Body $login
-    Write-Host "signin: OK"
-    
-    $hdr = @{ Authorization = "Bearer $($auth.accessToken)" }
-    # Шаг 2 — привязка: POST /units/bind.
-    $bindBody = @{
-        deviceSerial = $DeviceSerial
-        userCode     = $UserCode
-        firmware     = @{
-            vendorCode       = $VendorCode
-            modelCode        = $ModelCode
-            firmwareVersion  = $FirmwareVersion
-            hardwareVersion  = $HardwareVersion
-        }
-        location = @{ latitude = $Lat; longitude = $Lon }
-    } | ConvertTo-Json -Depth 6
-    
-    $bind = Invoke-RestMethod -Method Post -Uri "$Base/api/customer/v1/units/bind" -Headers $hdr -ContentType "application/json" -Body $bindBody
-    if (-not $bind.items -or $bind.items.Count -eq 0) { $bind | ConvertTo-Json -Depth 10; throw "bind: пустой items" }
-    
-    Write-Host "bind: OK"
-    Write-Host "unitId:" $bind.items[0].unitId
-    Write-Host "accessToken:" ($auth.accessToken.Substring(0, [Math]::Min(24, $auth.accessToken.Length)) + "…")
-    
-    # Шаг 3 — обновить access-токен (опционально): POST /refresh.
-    if ($DoRefresh) {
-        $refBody = @{ refreshToken = $auth.refreshToken } | ConvertTo-Json
-        $ref = Invoke-RestMethod -Method Post -Uri "$Base/api/customer/v1/refresh" -ContentType "application/json" -Body $refBody
-        Write-Host "refresh: OK"
-        Write-Host "new accessToken:" ($ref.accessToken.Substring(0, [Math]::Min(24, $ref.accessToken.Length)) + "…")
+    $BaseUrl = 'https://api.umecdev.deviot.cloud'
+    $IdentityBase = 'https://http-identity.umecdev.deviot.cloud'
+
+    # Шаг 1: авторизация customer
+    $UserName = $env:UMEC_CUSTOMER_USER
+    $Password = $env:UMEC_CUSTOMER_PASSWORD
+    if (-not $UserName -or -not $Password) { throw 'Не заданы UMEC_CUSTOMER_USER/UMEC_CUSTOMER_PASSWORD' }
+
+    $SignInBody = @{ userName = $UserName; password = $Password } | ConvertTo-Json
+    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType 'application/json' -Body $SignInBody
+    $CustomerAccessToken = $SignIn.accessToken
+    $CustomerHeaders = @{ Authorization = "Bearer $CustomerAccessToken" }
+
+    # Шаг 2: получение device_code/user_code
+    $DeviceAuth = Invoke-RestMethod -Method Post -Uri "$IdentityBase/connect/deviceauthorization" -ContentType 'application/x-www-form-urlencoded' -Body @{ client_id = 'controller' }
+    $DeviceCode = $DeviceAuth.device_code
+    $UserCode = $DeviceAuth.user_code
+    $VerificationUri = $DeviceAuth.verification_uri
+    $PollInterval = [int]$DeviceAuth.interval
+    if (-not $PollInterval -or $PollInterval -le 0) { $PollInterval = 5 }
+
+    # Шаг 3: bind устройства
+    $DeviceSerial = $env:UMEC_DEVICE_SERIAL
+    $VendorCode = $env:UMEC_VENDOR_CODE
+    $ModelCode = $env:UMEC_MODEL_CODE
+    $FirmwareVersion = $env:UMEC_FIRMWARE_VERSION
+    $HardwareVersion = $env:UMEC_HARDWARE_VERSION
+    $DeviceMac = $env:UMEC_DEVICE_MAC
+    if (-not $DeviceSerial -or -not $VendorCode -or -not $ModelCode -or -not $FirmwareVersion -or -not $HardwareVersion -or -not $DeviceMac) {
+      throw 'Не заданы UMEC_DEVICE_SERIAL/UMEC_VENDOR_CODE/UMEC_MODEL_CODE/UMEC_FIRMWARE_VERSION/UMEC_HARDWARE_VERSION/UMEC_DEVICE_MAC'
     }
+
+    $BindBody = @{
+      deviceSerial = $DeviceSerial
+      userCode = $UserCode
+      verificationUrl = $VerificationUri
+      firmware = @{
+        vendorCode = $VendorCode
+        modelCode = $ModelCode
+        firmwareVersion = $FirmwareVersion
+        hardwareVersion = $HardwareVersion
+      }
+      deviceMacAddress = $DeviceMac
+      location = @{ latitude = 55.7558; longitude = 37.6173 }
+    } | ConvertTo-Json -Depth 10
+
+    $BindResp = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/units/bind" -Headers $CustomerHeaders -ContentType 'application/json' -Body $BindBody
+    if (-not $BindResp.items -or $BindResp.items.Count -eq 0) { throw 'Bind выполнен без items в ответе' }
+    $BoundUnitIds = @($BindResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
+    if (-not $BoundUnitIds -or $BoundUnitIds.Count -eq 0) { throw 'В ответе bind отсутствуют unitId' }
+
+    # Шаг 4: проверка, что привязанное устройство присутствует в профиле
+    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $CustomerHeaders
+    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw 'Список units пуст после bind' }
+    $ActualUnitIds = @($UnitsResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
+    $HasBoundUnit = $false
+    foreach ($id in $BoundUnitIds) {
+      if ($ActualUnitIds -contains $id) { $HasBoundUnit = $true; break }
+    }
+    if (-not $HasBoundUnit) { throw 'Привязанное устройство не найдено в GET /api/customer/v1/units' }
+
+    # Шаг 5: получение device token
+
+    $ServiceDeviceAccessToken = $null
+    for ($i = 0; $i -lt 120; $i++) {
+      try {
+        $TokenResp = Invoke-RestMethod -Method Post -Uri "$IdentityBase/connect/token" -ContentType 'application/x-www-form-urlencoded' -Body @{
+          grant_type = 'urn:ietf:params:oauth:grant-type:device_code'
+          device_code = $DeviceCode
+          client_id = 'controller'
+        }
+
+        if ($TokenResp.access_token) {
+          $ServiceDeviceAccessToken = $TokenResp.access_token
+          break
+        }
+      }
+      catch {
+        $ErrPayload = $_.ErrorDetails.Message | ConvertFrom-Json
+        if ($ErrPayload.error -eq 'authorization_pending') { Start-Sleep -Seconds $PollInterval; continue }
+        if ($ErrPayload.error -eq 'slow_down') { $PollInterval += 5; Start-Sleep -Seconds $PollInterval; continue }
+        throw
+      }
+    }
+
+    if (-not $ServiceDeviceAccessToken) { throw 'Не удалось получить device token за отведенное время' }
+    "device token acquired: $([bool]$ServiceDeviceAccessToken)"
     ```
