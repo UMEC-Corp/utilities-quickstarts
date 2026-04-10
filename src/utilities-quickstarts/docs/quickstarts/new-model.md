@@ -35,21 +35,42 @@
     resp.raise_for_status()
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $VendorCode = "demo_vendor_001"
-    $VendorName = "Demo Vendor"
-    $VendorSecret = "change_me_secret"
+=== "C#"
+    ```csharp
+    using System.Net.Http.Json;
 
-    $Body = @{
-      code = $VendorCode
-      name = $VendorName
-      secret = $VendorSecret
-    } | ConvertTo-Json
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var vendorCode = "demo_vendor_001";
+    var vendorName = "Demo Vendor";
+    var vendorSecret = "change_me_secret";
 
-    $Resp = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/vendor/v1/vendors" -ContentType "application/json" -Body $Body
-    $Resp | ConvertTo-Json -Depth 10
+    using var http = new HttpClient();
+    var resp = await http.PostAsJsonAsync($"{baseUrl}/api/vendor/v1/vendors", new
+    {
+        code = vendorCode,
+        name = vendorName,
+        secret = vendorSecret
+    });
+    Console.WriteLine((int)resp.StatusCode);
+    Console.WriteLine(await resp.Content.ReadAsStringAsync());
+    resp.EnsureSuccessStatusCode();
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const vendorCode = "demo_vendor_001";
+    const vendorName = "Demo Vendor";
+    const vendorSecret = "change_me_secret";
+
+    const resp = await fetch(`${baseUrl}/api/vendor/v1/vendors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: vendorCode, name: vendorName, secret: vendorSecret }),
+    });
+    console.log(resp.status);
+    console.log(await resp.text());
+    if (!resp.ok) throw new Error("Vendor registration failed");
     ```
 
 ### 2. Получите access token через Identity (`POST /connect/token`).
@@ -79,22 +100,45 @@
     print("token acquired:", bool(access_token))
     ```
 
-=== "PowerShell"
-    ```powershell
-    $TokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token"
+=== "C#"
+    ```csharp
+    using System.Net.Http.Json;
+    using System.Text.Json;
 
-    # Сопоставление бизнес-данных:
-    # vendorCode -> client_id
-    # vendorSecret -> client_secret
-    $Form = @{
-      grant_type = "client_credentials"
-      client_id = "demo_vendor_001"
-      client_secret = "change_me_secret"
-    }
+    var tokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token";
+    var form = new Dictionary<string, string>
+    {
+        ["grant_type"] = "client_credentials",
+        ["client_id"] = "demo_vendor_001",
+        ["client_secret"] = "change_me_secret"
+    };
 
-    $Token = Invoke-RestMethod -Method Post -Uri $TokenEndpoint -ContentType "application/x-www-form-urlencoded" -Body $Form
-    $AccessToken = $Token.access_token
-    $AccessToken
+    using var http = new HttpClient();
+    var tokenResp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(form));
+    tokenResp.EnsureSuccessStatusCode();
+    var tokenPayload = await tokenResp.Content.ReadFromJsonAsync<JsonElement>();
+    var accessToken = tokenPayload.GetProperty("access_token").GetString();
+    Console.WriteLine($"token acquired: {!string.IsNullOrEmpty(accessToken)}");
+    ```
+
+=== "Node.js"
+    ```javascript
+    const tokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token";
+    const form = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: "demo_vendor_001",
+      client_secret: "change_me_secret",
+    });
+
+    const tokenResp = await fetch(tokenEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    if (!tokenResp.ok) throw new Error(await tokenResp.text());
+    const token = await tokenResp.json();
+    const accessToken = token.access_token;
+    console.log("token acquired:", Boolean(accessToken));
     ```
 
 ### 3. Добавьте модель сенсора температуры (`POST /api/vendor/v1/sensors`).
@@ -125,24 +169,41 @@
     resp.raise_for_status()
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $AccessToken = "<access_token_from_step_2>"
+=== "C#"
+    ```csharp
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var accessToken = "<access_token_from_step_2>";
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-    $Headers = @{ Authorization = "Bearer $AccessToken" }
-    $Body = @{
-      items = @(
-        @{
-          code = "temp_c"
-          name = "Temperature"
-          unitOfMeasure = "C"
-        }
-      )
-    } | ConvertTo-Json -Depth 10
+    var resp = await http.PostAsJsonAsync($"{baseUrl}/api/vendor/v1/sensors", new
+    {
+        items = new[] { new { code = "temp_c", name = "Temperature", unitOfMeasure = "C" } }
+    });
+    Console.WriteLine((int)resp.StatusCode);
+    Console.WriteLine(await resp.Content.ReadAsStringAsync());
+    resp.EnsureSuccessStatusCode();
+    ```
 
-    $Resp = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/vendor/v1/sensors" -Headers $Headers -ContentType "application/json" -Body $Body
-    $Resp | ConvertTo-Json -Depth 10
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const accessToken = "<access_token_from_step_2>";
+
+    const resp = await fetch(`${baseUrl}/api/vendor/v1/sensors`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        items: [{ code: "temp_c", name: "Temperature", unitOfMeasure: "C" }],
+      }),
+    });
+    console.log(resp.status);
+    console.log(await resp.text());
+    if (!resp.ok) throw new Error("Create sensor failed");
     ```
 
 ### 4. Создайте/обновите модель устройства (`PUT /api/vendor/v1/models`).
@@ -185,34 +246,65 @@
     resp.raise_for_status()
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $AccessToken = "<access_token_from_step_2>"
-    $Headers = @{ Authorization = "Bearer $AccessToken" }
+=== "C#"
+    ```csharp
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var accessToken = "<access_token_from_step_2>";
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-    $Body = @{
-      model = @{
-        modelCode = "demo-temp-model-v1"
-        name = "Demo Temperature Device"
-        firmwareVersion = "1.0.0"
-        hardwareVersion = "1.0"
-        units = @{
-          main = @{
-            name = "Main unit"
-            sensors = @{
-              temperature = @{
-                connectedSensorCode = "temp_c"
-                name = "Temperature sensor"
-              }
+    var payload = new
+    {
+        model = new
+        {
+            modelCode = "demo-temp-model-v1",
+            name = "Demo Temperature Device",
+            firmwareVersion = "1.0.0",
+            hardwareVersion = "1.0",
+            units = new
+            {
+                main = new
+                {
+                    name = "Main unit",
+                    sensors = new { temperature = new { connectedSensorCode = "temp_c", name = "Temperature sensor" } }
+                }
             }
-          }
         }
-      }
-    } | ConvertTo-Json -Depth 20
+    };
+    var resp = await http.PutAsJsonAsync($"{baseUrl}/api/vendor/v1/models", payload);
+    Console.WriteLine((int)resp.StatusCode);
+    Console.WriteLine(await resp.Content.ReadAsStringAsync());
+    resp.EnsureSuccessStatusCode();
+    ```
 
-    $Resp = Invoke-RestMethod -Method Put -Uri "$BaseUrl/api/vendor/v1/models" -Headers $Headers -ContentType "application/json" -Body $Body
-    $Resp | ConvertTo-Json -Depth 10
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const accessToken = "<access_token_from_step_2>";
+
+    const payload = {
+      model: {
+        modelCode: "demo-temp-model-v1",
+        name: "Demo Temperature Device",
+        firmwareVersion: "1.0.0",
+        hardwareVersion: "1.0",
+        units: {
+          main: {
+            name: "Main unit",
+            sensors: { temperature: { connectedSensorCode: "temp_c", name: "Temperature sensor" } },
+          },
+        },
+      },
+    };
+    const resp = await fetch(`${baseUrl}/api/vendor/v1/models`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(payload),
+    });
+    console.log(resp.status);
+    console.log(await resp.text());
+    if (!resp.ok) throw new Error("Upsert model failed");
     ```
 
 ### 5. (Опционально) Проверьте созданную модель (`GET /api/vendor/v1/models/{modelCode}`).
@@ -235,15 +327,33 @@
     resp.raise_for_status()
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $AccessToken = "<access_token_from_step_2>"
-    $ModelCode = "demo-temp-model-v1"
+=== "C#"
+    ```csharp
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var accessToken = "<access_token_from_step_2>";
+    var modelCode = "demo-temp-model-v1";
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-    $Headers = @{ Authorization = "Bearer $AccessToken" }
-    $Resp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/vendor/v1/models/$ModelCode" -Headers $Headers
-    $Resp | ConvertTo-Json -Depth 20
+    var resp = await http.GetAsync($"{baseUrl}/api/vendor/v1/models/{modelCode}");
+    Console.WriteLine((int)resp.StatusCode);
+    Console.WriteLine(await resp.Content.ReadAsStringAsync());
+    resp.EnsureSuccessStatusCode();
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const accessToken = "<access_token_from_step_2>";
+    const modelCode = "demo-temp-model-v1";
+
+    const resp = await fetch(`${baseUrl}/api/vendor/v1/models/${modelCode}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    console.log(resp.status);
+    console.log(await resp.text());
+    if (!resp.ok) throw new Error("Get model failed");
     ```
 
 ## Ожидаемый результат
@@ -333,67 +443,104 @@
     print(check.json())
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $TokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token"
-    $VendorCode = "demo_vendor_001"
-    $VendorName = "Demo Vendor"
-    $VendorSecret = "change_me_secret"
+=== "C#"
+    ```csharp
+    using System.Net.Http.Headers;
+    using System.Net.Http.Json;
+    using System.Text.Json;
 
-    # Шаг 1: регистрация вендора (без авторизации)
-    $RegisterBody = @{
-      code = $VendorCode
-      name = $VendorName
-      secret = $VendorSecret
-    } | ConvertTo-Json
-    Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/vendor/v1/vendors" -ContentType "application/json" -Body $RegisterBody | Out-Null
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var tokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token";
+    var vendorCode = "demo_vendor_001";
+    var vendorName = "Demo Vendor";
+    var vendorSecret = "change_me_secret";
 
-    # Шаг 2: получение токена в Identity (client_credentials)
-    $TokenForm = @{
-      grant_type = "client_credentials"
-      client_id = $VendorCode
-      client_secret = $VendorSecret
-    }
-    $Token = Invoke-RestMethod -Method Post -Uri $TokenEndpoint -ContentType "application/x-www-form-urlencoded" -Body $TokenForm
-    $AccessToken = $Token.access_token
-    $Headers = @{ Authorization = "Bearer $AccessToken" }
+    using var http = new HttpClient();
 
-    # Шаг 3: добавление сенсора
-    $SensorsBody = @{
-      items = @(
-        @{
-          code = "temp_c"
-          name = "Temperature"
-          unitOfMeasure = "C"
+    await http.PostAsJsonAsync($"{baseUrl}/api/vendor/v1/vendors", new { code = vendorCode, name = vendorName, secret = vendorSecret });
+    var tokenResp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(new Dictionary<string, string>
+    {
+        ["grant_type"] = "client_credentials",
+        ["client_id"] = vendorCode,
+        ["client_secret"] = vendorSecret
+    }));
+    tokenResp.EnsureSuccessStatusCode();
+    var tokenPayload = await tokenResp.Content.ReadFromJsonAsync<JsonElement>();
+    var accessToken = tokenPayload.GetProperty("access_token").GetString();
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+    await http.PostAsJsonAsync($"{baseUrl}/api/vendor/v1/sensors", new
+    {
+        items = new[] { new { code = "temp_c", name = "Temperature", unitOfMeasure = "C" } }
+    });
+
+    await http.PutAsJsonAsync($"{baseUrl}/api/vendor/v1/models", new
+    {
+        model = new
+        {
+            modelCode = "demo-temp-model-v1",
+            name = "Demo Temperature Device",
+            firmwareVersion = "1.0.0",
+            hardwareVersion = "1.0",
+            units = new { main = new { name = "Main unit", sensors = new { temperature = new { connectedSensorCode = "temp_c", name = "Temperature sensor" } } } }
         }
-      )
-    } | ConvertTo-Json -Depth 10
-    Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/vendor/v1/sensors" -Headers $Headers -ContentType "application/json" -Body $SensorsBody | Out-Null
+    });
 
-    # Шаг 4: создание/обновление модели
-    $ModelBody = @{
-      model = @{
-        modelCode = "demo-temp-model-v1"
-        name = "Demo Temperature Device"
-        firmwareVersion = "1.0.0"
-        hardwareVersion = "1.0"
-        units = @{
-          main = @{
-            name = "Main unit"
-            sensors = @{
-              temperature = @{
-                connectedSensorCode = "temp_c"
-                name = "Temperature sensor"
-              }
-            }
-          }
-        }
-      }
-    } | ConvertTo-Json -Depth 20
-    Invoke-RestMethod -Method Put -Uri "$BaseUrl/api/vendor/v1/models" -Headers $Headers -ContentType "application/json" -Body $ModelBody | Out-Null
+    var check = await http.GetAsync($"{baseUrl}/api/vendor/v1/models/demo-temp-model-v1");
+    check.EnsureSuccessStatusCode();
+    Console.WriteLine(await check.Content.ReadAsStringAsync());
+    ```
 
-    # Шаг 5: проверка модели
-    $Check = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/vendor/v1/models/demo-temp-model-v1" -Headers $Headers
-    $Check | ConvertTo-Json -Depth 20
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const tokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token";
+    const vendorCode = "demo_vendor_001";
+    const vendorName = "Demo Vendor";
+    const vendorSecret = "change_me_secret";
+
+    await fetch(`${baseUrl}/api/vendor/v1/vendors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: vendorCode, name: vendorName, secret: vendorSecret }),
+    });
+
+    const tokenResp = await fetch(tokenEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: vendorCode,
+        client_secret: vendorSecret,
+      }),
+    });
+    if (!tokenResp.ok) throw new Error(await tokenResp.text());
+    const { access_token: accessToken } = await tokenResp.json();
+    const authHeaders = { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+
+    await fetch(`${baseUrl}/api/vendor/v1/sensors`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ items: [{ code: "temp_c", name: "Temperature", unitOfMeasure: "C" }] }),
+    });
+
+    await fetch(`${baseUrl}/api/vendor/v1/models`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({
+        model: {
+          modelCode: "demo-temp-model-v1",
+          name: "Demo Temperature Device",
+          firmwareVersion: "1.0.0",
+          hardwareVersion: "1.0",
+          units: { main: { name: "Main unit", sensors: { temperature: { connectedSensorCode: "temp_c", name: "Temperature sensor" } } } },
+        },
+      }),
+    });
+
+    const check = await fetch(`${baseUrl}/api/vendor/v1/models/demo-temp-model-v1`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!check.ok) throw new Error(await check.text());
+    console.log(await check.json());
     ```

@@ -30,14 +30,37 @@
     headers = {"Authorization": f"Bearer {access_token}"}
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
+=== "C#"
+    ```csharp
+    using System.Net.Http.Json;
 
-    $SignInBody = @{ userName = "customer_demo"; password = "change_me_password" } | ConvertTo-Json
-    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType "application/json" -Body $SignInBody
-    $AccessToken = $SignIn.accessToken
-    $Headers = @{ Authorization = "Bearer $AccessToken" }
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    using var http = new HttpClient();
+
+    var signInResponse = await http.PostAsJsonAsync(
+        $"{baseUrl}/api/customer/v1/signin",
+        new { userName = "customer_demo", password = "change_me_password" }
+    );
+    signInResponse.EnsureSuccessStatusCode();
+    var signInPayload = await signInResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var accessToken = signInPayload.GetProperty("accessToken").GetString();
+
+    http.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+
+    const signIn = await fetch(`${baseUrl}/api/customer/v1/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName: "customer_demo", password: "change_me_password" }),
+    });
+    if (!signIn.ok) throw new Error(await signIn.text());
+    const { accessToken } = await signIn.json();
+    const headers = { Authorization: `Bearer ${accessToken}` };
     ```
 
 ### 2. Получите `unitId` из списка устройств customer (`GET /api/customer/v1/units`).
@@ -52,11 +75,23 @@
     unit_id = units[0]["unitId"]
     ```
 
-=== "PowerShell"
-    ```powershell
-    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $Headers
-    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw "У пользователя нет устройств" }
-    $UnitId = $UnitsResp.items[0].unitId
+=== "C#"
+    ```csharp
+    var unitsResponse = await http.GetAsync($"{baseUrl}/api/customer/v1/units");
+    unitsResponse.EnsureSuccessStatusCode();
+    var unitsPayload = await unitsResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var items = unitsPayload.GetProperty("items");
+    if (items.GetArrayLength() == 0) throw new Exception("У пользователя нет устройств");
+    var unitId = items[0].GetProperty("unitId").GetInt64();
+    ```
+
+=== "Node.js"
+    ```javascript
+    const unitsResp = await fetch(`${baseUrl}/api/customer/v1/units`, { headers });
+    if (!unitsResp.ok) throw new Error(await unitsResp.text());
+    const unitsData = await unitsResp.json();
+    if (!unitsData.items?.length) throw new Error("У пользователя нет устройств");
+    const unitId = unitsData.items[0].unitId;
     ```
 
 ### 3. Получите ID сенсоров (`inputIds`) из деталей устройства (`GET /api/customer/v1/units/{unitId}`), затем сформируйте список `inputIds` для запроса телеметрии.
@@ -75,12 +110,24 @@
     input_ids = [inputs[0]["id"]]
     ```
 
-=== "PowerShell"
-    ```powershell
-    $UnitDetails = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId" -Headers $Headers
-    $Inputs = $UnitDetails.item.inputs
-    if (-not $Inputs -or $Inputs.Count -eq 0) { throw "У устройства отсутствуют входы" }
-    $InputIds = @($Inputs[0].id)
+=== "C#"
+    ```csharp
+    var unitDetailsResponse = await http.GetAsync($"{baseUrl}/api/customer/v1/units/{unitId}");
+    unitDetailsResponse.EnsureSuccessStatusCode();
+    var unitDetails = await unitDetailsResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var inputs = unitDetails.GetProperty("item").GetProperty("inputs");
+    if (inputs.GetArrayLength() == 0) throw new Exception("У устройства отсутствуют входы");
+    var inputIds = new[] { inputs[0].GetProperty("id").GetString()! };
+    ```
+
+=== "Node.js"
+    ```javascript
+    const unitDetailsResp = await fetch(`${baseUrl}/api/customer/v1/units/${unitId}`, { headers });
+    if (!unitDetailsResp.ok) throw new Error(await unitDetailsResp.text());
+    const unitDetails = await unitDetailsResp.json();
+    const inputs = unitDetails.item?.inputs ?? [];
+    if (!inputs.length) throw new Error("У устройства отсутствуют входы");
+    const inputIds = [inputs[0].id];
     ```
 
 ### 4. Запросите телеметрию по `inputIds` через `GET /api/customer/v1/units/{unitId}/ticks`.
@@ -105,18 +152,26 @@
     print(ticks.json())
     ```
 
-=== "PowerShell"
-    ```powershell
-    $Query = @(
-      "inputIds=$($InputIds[0])",
-      "begin=1710000000000",
-      "end=1710086400000",
-      "timeFrame=60",
-      "difference=false"
-    ) -join "&"
+=== "C#"
+    ```csharp
+    var query = $"inputIds={Uri.EscapeDataString(inputIds[0])}&begin=1710000000000&end=1710086400000&timeFrame=60&difference=false";
+    var ticksResponse = await http.GetAsync($"{baseUrl}/api/customer/v1/units/{unitId}/ticks?{query}");
+    ticksResponse.EnsureSuccessStatusCode();
+    Console.WriteLine(await ticksResponse.Content.ReadAsStringAsync());
+    ```
 
-    $Ticks = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId/ticks?$Query" -Headers $Headers
-    $Ticks | ConvertTo-Json -Depth 20
+=== "Node.js"
+    ```javascript
+    const params = new URLSearchParams({
+      inputIds: inputIds[0],
+      begin: "1710000000000",
+      end: "1710086400000",
+      timeFrame: "60",
+      difference: "false",
+    });
+    const ticks = await fetch(`${baseUrl}/api/customer/v1/units/${unitId}/ticks?${params}`, { headers });
+    if (!ticks.ok) throw new Error(await ticks.text());
+    console.log(await ticks.json());
     ```
 
 ## Ожидаемый результат
@@ -175,36 +230,86 @@
     print(ticks.json())
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
+=== "C#"
+    ```csharp
+    using System.Net.Http.Headers;
+    using System.Net.Http.Json;
+    using System.Text.Json;
 
-    # Шаг 1: авторизация customer
-    $SignInBody = @{ userName = "customer_demo"; password = "change_me_password" } | ConvertTo-Json
-    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType "application/json" -Body $SignInBody
-    $AccessToken = $SignIn.accessToken
-    $Headers = @{ Authorization = "Bearer $AccessToken" }
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    using var http = new HttpClient();
 
-    # Шаг 2: получение unitId
-    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $Headers
-    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw "У пользователя нет устройств" }
-    $UnitId = $UnitsResp.items[0].unitId
+    // Шаг 1: авторизация customer
+    var signInResponse = await http.PostAsJsonAsync(
+        $"{baseUrl}/api/customer/v1/signin",
+        new { userName = "customer_demo", password = "change_me_password" }
+    );
+    signInResponse.EnsureSuccessStatusCode();
+    var signInPayload = await signInResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var accessToken = signInPayload.GetProperty("accessToken").GetString();
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-    # Шаг 3: получение inputIds
-    $UnitDetails = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId" -Headers $Headers
-    $Inputs = $UnitDetails.item.inputs
-    if (-not $Inputs -or $Inputs.Count -eq 0) { throw "У устройства отсутствуют входы" }
-    $InputIds = @($Inputs[0].id)
+    // Шаг 2: получение unitId
+    var unitsResponse = await http.GetAsync($"{baseUrl}/api/customer/v1/units");
+    unitsResponse.EnsureSuccessStatusCode();
+    var unitsPayload = await unitsResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var items = unitsPayload.GetProperty("items");
+    if (items.GetArrayLength() == 0) throw new Exception("У пользователя нет устройств");
+    var unitId = items[0].GetProperty("unitId").GetInt64();
 
-    # Шаг 4: запрос телеметрии
-    $Query = @(
-      "inputIds=$($InputIds[0])",
-      "begin=1710000000000",
-      "end=1710086400000",
-      "timeFrame=60",
-      "difference=false"
-    ) -join "&"
+    // Шаг 3: получение inputIds
+    var unitDetailsResponse = await http.GetAsync($"{baseUrl}/api/customer/v1/units/{unitId}");
+    unitDetailsResponse.EnsureSuccessStatusCode();
+    var unitDetails = await unitDetailsResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var inputs = unitDetails.GetProperty("item").GetProperty("inputs");
+    if (inputs.GetArrayLength() == 0) throw new Exception("У устройства отсутствуют входы");
+    var inputId = inputs[0].GetProperty("id").GetString();
 
-    $Ticks = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units/$UnitId/ticks?$Query" -Headers $Headers
-    $Ticks | ConvertTo-Json -Depth 20
+    // Шаг 4: запрос телеметрии
+    var query = $"inputIds={Uri.EscapeDataString(inputId!)}&begin=1710000000000&end=1710086400000&timeFrame=60&difference=false";
+    var ticksResponse = await http.GetAsync($"{baseUrl}/api/customer/v1/units/{unitId}/ticks?{query}");
+    ticksResponse.EnsureSuccessStatusCode();
+    Console.WriteLine(await ticksResponse.Content.ReadAsStringAsync());
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+
+    // Шаг 1: авторизация customer
+    const signIn = await fetch(`${baseUrl}/api/customer/v1/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName: "customer_demo", password: "change_me_password" }),
+    });
+    if (!signIn.ok) throw new Error(await signIn.text());
+    const { accessToken } = await signIn.json();
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    // Шаг 2: получение unitId
+    const unitsResp = await fetch(`${baseUrl}/api/customer/v1/units`, { headers });
+    if (!unitsResp.ok) throw new Error(await unitsResp.text());
+    const unitsData = await unitsResp.json();
+    if (!unitsData.items?.length) throw new Error("У пользователя нет устройств");
+    const unitId = unitsData.items[0].unitId;
+
+    // Шаг 3: получение inputIds
+    const unitDetailsResp = await fetch(`${baseUrl}/api/customer/v1/units/${unitId}`, { headers });
+    if (!unitDetailsResp.ok) throw new Error(await unitDetailsResp.text());
+    const unitDetails = await unitDetailsResp.json();
+    const inputs = unitDetails.item?.inputs ?? [];
+    if (!inputs.length) throw new Error("У устройства отсутствуют входы");
+    const inputId = inputs[0].id;
+
+    // Шаг 4: запрос телеметрии
+    const params = new URLSearchParams({
+      inputIds: String(inputId),
+      begin: "1710000000000",
+      end: "1710086400000",
+      timeFrame: "60",
+      difference: "false",
+    });
+    const ticks = await fetch(`${baseUrl}/api/customer/v1/units/${unitId}/ticks?${params}`, { headers });
+    if (!ticks.ok) throw new Error(await ticks.text());
+    console.log(await ticks.json());
     ```

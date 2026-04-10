@@ -33,17 +33,40 @@
     print("customer_access_token acquired:", bool(customer_access_token))
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = 'https://api.umecdev.deviot.cloud'
-    $UserName = $env:UMEC_CUSTOMER_USER
-    $Password = $env:UMEC_CUSTOMER_PASSWORD
-    if (-not $UserName -or -not $Password) { throw 'Не заданы UMEC_CUSTOMER_USER/UMEC_CUSTOMER_PASSWORD' }
+=== "C#"
+    ```csharp
+    using System.Net.Http.Json;
+    using System.Text.Json;
 
-    $SignInBody = @{ userName = $UserName; password = $Password } | ConvertTo-Json
-    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType 'application/json' -Body $SignInBody
-    $CustomerAccessToken = $SignIn.accessToken
-    "customer_access_token acquired: $([bool]$CustomerAccessToken)"
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var userName = Environment.GetEnvironmentVariable("UMEC_CUSTOMER_USER");
+    var password = Environment.GetEnvironmentVariable("UMEC_CUSTOMER_PASSWORD");
+    if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(password))
+        throw new Exception("Не заданы UMEC_CUSTOMER_USER/UMEC_CUSTOMER_PASSWORD");
+
+    using var http = new HttpClient();
+    var signIn = await http.PostAsJsonAsync($"{baseUrl}/api/customer/v1/signin", new { userName, password });
+    signIn.EnsureSuccessStatusCode();
+    var payload = await signIn.Content.ReadFromJsonAsync<JsonElement>();
+    var customerAccessToken = payload.GetProperty("accessToken").GetString();
+    Console.WriteLine($"customer_access_token acquired: {!string.IsNullOrEmpty(customerAccessToken)}");
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const userName = process.env.UMEC_CUSTOMER_USER;
+    const password = process.env.UMEC_CUSTOMER_PASSWORD;
+    if (!userName || !password) throw new Error("Не заданы UMEC_CUSTOMER_USER/UMEC_CUSTOMER_PASSWORD");
+
+    const signIn = await fetch(`${baseUrl}/api/customer/v1/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName, password }),
+    });
+    if (!signIn.ok) throw new Error(await signIn.text());
+    const { accessToken: customerAccessToken } = await signIn.json();
+    console.log("customer_access_token acquired:", Boolean(customerAccessToken));
     ```
 
 ### 2. Получить `device_code`, `user_code`, `verification_uri`, `verification_uri_complete` в Identity (`POST /connect/deviceauthorization`).
@@ -72,20 +95,48 @@
     print("User code:", user_code)
     ```
 
-=== "PowerShell"
-    ```powershell
-    $DeviceAuthorizationEndpoint = 'https://http-identity.umecdev.deviot.cloud/connect/deviceauthorization'
+=== "C#"
+    ```csharp
+    using System.Text.Json;
 
-    $DeviceAuth = Invoke-RestMethod -Method Post -Uri $DeviceAuthorizationEndpoint -ContentType 'application/x-www-form-urlencoded' -Body @{ client_id = 'controller' }
-    $DeviceCode = $DeviceAuth.device_code
-    $UserCode = $DeviceAuth.user_code
-    $VerificationUri = $DeviceAuth.verification_uri
-    $VerificationUriComplete = $DeviceAuth.verification_uri_complete
-    $PollInterval = [int]($DeviceAuth.interval)
-    if (-not $PollInterval -or $PollInterval -le 0) { $PollInterval = 5 }
+    var endpoint = "https://http-identity.umecdev.deviot.cloud/connect/deviceauthorization";
+    using var http = new HttpClient();
+    var deviceAuth = await http.PostAsync(endpoint, new FormUrlEncodedContent(new Dictionary<string, string>
+    {
+        ["client_id"] = "controller"
+    }));
+    deviceAuth.EnsureSuccessStatusCode();
+    var devicePayload = await deviceAuth.Content.ReadFromJsonAsync<JsonElement>();
 
-    "Open: $VerificationUriComplete"
-    "User code: $UserCode"
+    var deviceCode = devicePayload.GetProperty("device_code").GetString();
+    var userCode = devicePayload.GetProperty("user_code").GetString();
+    var verificationUri = devicePayload.GetProperty("verification_uri").GetString();
+    var verificationUriComplete = devicePayload.GetProperty("verification_uri_complete").GetString();
+    var pollInterval = devicePayload.TryGetProperty("interval", out var intervalEl) ? intervalEl.GetInt32() : 5;
+
+    Console.WriteLine($"Open: {verificationUriComplete}");
+    Console.WriteLine($"User code: {userCode}");
+    ```
+
+=== "Node.js"
+    ```javascript
+    const endpoint = "https://http-identity.umecdev.deviot.cloud/connect/deviceauthorization";
+    const deviceAuth = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: "controller" }),
+    });
+    if (!deviceAuth.ok) throw new Error(await deviceAuth.text());
+    const deviceData = await deviceAuth.json();
+
+    const deviceCode = deviceData.device_code;
+    const userCode = deviceData.user_code;
+    const verificationUri = deviceData.verification_uri;
+    const verificationUriComplete = deviceData.verification_uri_complete;
+    let pollInterval = Number(deviceData.interval || 5);
+
+    console.log("Open:", verificationUriComplete);
+    console.log("User code:", userCode);
     ```
 
 ### 3. Выполнить привязку устройства (`POST /api/customer/v1/units/bind`).
@@ -134,43 +185,74 @@
     print("bound unitIds:", bound_unit_ids)
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = 'https://api.umecdev.deviot.cloud'
-    $CustomerAccessToken = '<полученный_на_шаге_1_token>'
-    $UserCode = '<полученный_на_шаге_2_user_code>'
-    $VerificationUri = '<полученный_на_шаге_2_verification_uri>'
+=== "C#"
+    ```csharp
+    using System.Net.Http.Headers;
+    using System.Net.Http.Json;
+    using System.Text.Json;
 
-    $DeviceSerial = $env:UMEC_DEVICE_SERIAL
-    $VendorCode = $env:UMEC_VENDOR_CODE
-    $ModelCode = $env:UMEC_MODEL_CODE
-    $FirmwareVersion = $env:UMEC_FIRMWARE_VERSION
-    $HardwareVersion = $env:UMEC_HARDWARE_VERSION
-    $DeviceMac = $env:UMEC_DEVICE_MAC
-    if (-not $DeviceSerial -or -not $VendorCode -or -not $ModelCode -or -not $FirmwareVersion -or -not $HardwareVersion -or -not $DeviceMac) {
-      throw 'Не заданы UMEC_DEVICE_SERIAL/UMEC_VENDOR_CODE/UMEC_MODEL_CODE/UMEC_FIRMWARE_VERSION/UMEC_HARDWARE_VERSION/UMEC_DEVICE_MAC'
-    }
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var customerAccessToken = "<полученный_на_шаге_1_token>";
+    var userCode = "<полученный_на_шаге_2_user_code>";
+    var verificationUri = "<полученный_на_шаге_2_verification_uri>";
 
-    $Headers = @{ Authorization = "Bearer $CustomerAccessToken" }
-    $BindBody = @{
-      deviceSerial = $DeviceSerial
-      userCode = $UserCode
-      verificationUrl = $VerificationUri
-      firmware = @{
-        vendorCode = $VendorCode
-        modelCode = $ModelCode
-        firmwareVersion = $FirmwareVersion
-        hardwareVersion = $HardwareVersion
-      }
-      deviceMacAddress = $DeviceMac
-      location = @{ latitude = 55.7558; longitude = 37.6173 }
-    } | ConvertTo-Json -Depth 10
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
+    var bindResp = await http.PostAsJsonAsync($"{baseUrl}/api/customer/v1/units/bind", new
+    {
+        deviceSerial = Environment.GetEnvironmentVariable("UMEC_DEVICE_SERIAL"),
+        userCode,
+        verificationUrl = verificationUri,
+        firmware = new
+        {
+            vendorCode = Environment.GetEnvironmentVariable("UMEC_VENDOR_CODE"),
+            modelCode = Environment.GetEnvironmentVariable("UMEC_MODEL_CODE"),
+            firmwareVersion = Environment.GetEnvironmentVariable("UMEC_FIRMWARE_VERSION"),
+            hardwareVersion = Environment.GetEnvironmentVariable("UMEC_HARDWARE_VERSION")
+        },
+        deviceMacAddress = Environment.GetEnvironmentVariable("UMEC_DEVICE_MAC"),
+        location = new { latitude = 55.7558, longitude = 37.6173 }
+    });
+    bindResp.EnsureSuccessStatusCode();
+    var bindPayload = await bindResp.Content.ReadFromJsonAsync<JsonElement>();
+    var boundUnitIds = bindPayload.GetProperty("items").EnumerateArray()
+        .Where(x => x.TryGetProperty("unitId", out _))
+        .Select(x => x.GetProperty("unitId").GetInt64())
+        .ToArray();
+    Console.WriteLine($"bound unitIds: {string.Join(", ", boundUnitIds)}");
+    ```
 
-    $BindResp = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/units/bind" -Headers $Headers -ContentType 'application/json' -Body $BindBody
-    if (-not $BindResp.items -or $BindResp.items.Count -eq 0) { throw 'Bind выполнен без items в ответе' }
-    $BoundUnitIds = @($BindResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
-    if (-not $BoundUnitIds -or $BoundUnitIds.Count -eq 0) { throw 'В ответе bind отсутствуют unitId' }
-    "bound unitIds: $($BoundUnitIds -join ', ')"
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const customerAccessToken = "<полученный_на_шаге_1_token>";
+    const userCode = "<полученный_на_шаге_2_user_code>";
+    const verificationUri = "<полученный_на_шаге_2_verification_uri>";
+
+    const bindResp = await fetch(`${baseUrl}/api/customer/v1/units/bind`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${customerAccessToken}`,
+      },
+      body: JSON.stringify({
+        deviceSerial: process.env.UMEC_DEVICE_SERIAL,
+        userCode,
+        verificationUrl: verificationUri,
+        firmware: {
+          vendorCode: process.env.UMEC_VENDOR_CODE,
+          modelCode: process.env.UMEC_MODEL_CODE,
+          firmwareVersion: process.env.UMEC_FIRMWARE_VERSION,
+          hardwareVersion: process.env.UMEC_HARDWARE_VERSION,
+        },
+        deviceMacAddress: process.env.UMEC_DEVICE_MAC,
+        location: { latitude: 55.7558, longitude: 37.6173 },
+      }),
+    });
+    if (!bindResp.ok) throw new Error(await bindResp.text());
+    const bindData = await bindResp.json();
+    const boundUnitIds = (bindData.items ?? []).map((x) => x.unitId).filter(Boolean);
+    console.log("bound unitIds:", boundUnitIds);
     ```
 
 ### 4. Проверить наличие привязанного устройства: получить список устройств и убедиться, что в нем присутствует хотя бы один `unitId` из ответа bind.
@@ -197,24 +279,45 @@
     print("bind verification passed")
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = 'https://api.umecdev.deviot.cloud'
-    $CustomerAccessToken = '<полученный_на_шаге_1_token>'
-    $BoundUnitIds = @(12345) # unitId из шага 3
+=== "C#"
+    ```csharp
+    using System.Net.Http.Headers;
+    using System.Text.Json;
 
-    $Headers = @{ Authorization = "Bearer $CustomerAccessToken" }
-    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $Headers
-    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw 'Список units пуст после bind' }
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var customerAccessToken = "<полученный_на_шаге_1_token>";
+    var boundUnitIds = new[] { 12345L };
 
-    $ActualUnitIds = @($UnitsResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
-    $HasBoundUnit = $false
-    foreach ($id in $BoundUnitIds) {
-      if ($ActualUnitIds -contains $id) { $HasBoundUnit = $true; break }
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
+    var unitsResp = await http.GetAsync($"{baseUrl}/api/customer/v1/units");
+    unitsResp.EnsureSuccessStatusCode();
+    var unitsPayload = await unitsResp.Content.ReadFromJsonAsync<JsonElement>();
+    var actualUnitIds = unitsPayload.GetProperty("items").EnumerateArray()
+        .Where(x => x.TryGetProperty("unitId", out _))
+        .Select(x => x.GetProperty("unitId").GetInt64())
+        .ToHashSet();
+    if (!boundUnitIds.Any(id => actualUnitIds.Contains(id)))
+        throw new Exception("Привязанное устройство не найдено в GET /api/customer/v1/units");
+    Console.WriteLine("bind verification passed");
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const customerAccessToken = "<полученный_на_шаге_1_token>";
+    const boundUnitIds = [12345];
+
+    const unitsResp = await fetch(`${baseUrl}/api/customer/v1/units`, {
+      headers: { Authorization: `Bearer ${customerAccessToken}` },
+    });
+    if (!unitsResp.ok) throw new Error(await unitsResp.text());
+    const unitsData = await unitsResp.json();
+    const actualUnitIds = new Set((unitsData.items ?? []).map((x) => x.unitId).filter(Boolean));
+    if (!boundUnitIds.some((id) => actualUnitIds.has(id))) {
+      throw new Error("Привязанное устройство не найдено в GET /api/customer/v1/units");
     }
-    if (-not $HasBoundUnit) { throw 'Привязанное устройство не найдено в GET /api/customer/v1/units' }
-
-    "bind verification passed"
+    console.log("bind verification passed");
     ```
 
 ### 5. Получить device token в Identity (`POST /connect/token`).
@@ -264,38 +367,77 @@
     print("device token acquired:", bool(service_device_access_token))
     ```
 
-=== "PowerShell"
-    ```powershell
-    $TokenEndpoint = 'https://http-identity.umecdev.deviot.cloud/connect/token'
-    $DeviceCode = '<полученный_на_шаге_2_device_code>'
-    $ClientId = 'controller'
+=== "C#"
+    ```csharp
+    using System.Text.Json;
 
-    $PollInterval = 5
-    $ServiceDeviceAccessToken = $null
+    var tokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token";
+    var deviceCode = "<полученный_на_шаге_2_device_code>";
+    var clientId = "controller";
+    var pollInterval = 5;
+    string? serviceDeviceAccessToken = null;
 
-    for ($i = 0; $i -lt 120; $i++) {
-      try {
-        $TokenResp = Invoke-RestMethod -Method Post -Uri $TokenEndpoint -ContentType 'application/x-www-form-urlencoded' -Body @{
-          grant_type = 'urn:ietf:params:oauth:grant-type:device_code'
-          device_code = $DeviceCode
-          client_id = $ClientId
+    using var http = new HttpClient();
+    for (var i = 0; i < 120; i++)
+    {
+        var resp = await http.PostAsync(tokenEndpoint, new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["device_code"] = deviceCode,
+            ["client_id"] = clientId
+        }));
+        var payload = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
+        if (resp.IsSuccessStatusCode && payload.TryGetProperty("access_token", out var tokenEl))
+        {
+            serviceDeviceAccessToken = tokenEl.GetString();
+            break;
         }
-
-        if ($TokenResp.access_token) {
-          $ServiceDeviceAccessToken = $TokenResp.access_token
-          break
-        }
-      }
-      catch {
-        $ErrPayload = $_.ErrorDetails.Message | ConvertFrom-Json
-        if ($ErrPayload.error -eq 'authorization_pending') { Start-Sleep -Seconds $PollInterval; continue }
-        if ($ErrPayload.error -eq 'slow_down') { $PollInterval += 5; Start-Sleep -Seconds $PollInterval; continue }
-        throw
-      }
+        var error = payload.TryGetProperty("error", out var errorEl) ? errorEl.GetString() : null;
+        if (error == "authorization_pending") { await Task.Delay(pollInterval * 1000); continue; }
+        if (error == "slow_down") { pollInterval += 5; await Task.Delay(pollInterval * 1000); continue; }
+        throw new Exception(payload.ToString());
     }
+    if (string.IsNullOrWhiteSpace(serviceDeviceAccessToken))
+        throw new Exception("Не удалось получить device token за отведенное время");
+    Console.WriteLine($"device token acquired: {!string.IsNullOrEmpty(serviceDeviceAccessToken)}");
+    ```
 
-    if (-not $ServiceDeviceAccessToken) { throw 'Не удалось получить device token за отведенное время' }
-    "device token acquired: $([bool]$ServiceDeviceAccessToken)"
+=== "Node.js"
+    ```javascript
+    const tokenEndpoint = "https://http-identity.umecdev.deviot.cloud/connect/token";
+    const deviceCode = "<полученный_на_шаге_2_device_code>";
+    const clientId = "controller";
+    let pollInterval = 5;
+    let serviceDeviceAccessToken = null;
+
+    for (let i = 0; i < 120; i += 1) {
+      const tokenResp = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCode,
+          client_id: clientId,
+        }),
+      });
+      const payload = await tokenResp.json();
+      if (tokenResp.ok && payload.access_token) {
+        serviceDeviceAccessToken = payload.access_token;
+        break;
+      }
+      if (payload.error === "authorization_pending") {
+        await new Promise((r) => setTimeout(r, pollInterval * 1000));
+        continue;
+      }
+      if (payload.error === "slow_down") {
+        pollInterval += 5;
+        await new Promise((r) => setTimeout(r, pollInterval * 1000));
+        continue;
+      }
+      throw new Error(JSON.stringify(payload));
+    }
+    if (!serviceDeviceAccessToken) throw new Error("Не удалось получить device token за отведенное время");
+    console.log("device token acquired:", Boolean(serviceDeviceAccessToken));
     ```
 
 ## Ожидаемый результат
@@ -409,93 +551,158 @@
     print("device token acquired:", bool(service_device_access_token))
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = 'https://api.umecdev.deviot.cloud'
-    $IdentityBase = 'https://http-identity.umecdev.deviot.cloud'
+=== "C#"
+    ```csharp
+    using System.Net.Http.Headers;
+    using System.Net.Http.Json;
+    using System.Text.Json;
 
-    # Шаг 1: авторизация customer
-    $UserName = $env:UMEC_CUSTOMER_USER
-    $Password = $env:UMEC_CUSTOMER_PASSWORD
-    if (-not $UserName -or -not $Password) { throw 'Не заданы UMEC_CUSTOMER_USER/UMEC_CUSTOMER_PASSWORD' }
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var identityBase = "https://http-identity.umecdev.deviot.cloud";
+    using var http = new HttpClient();
 
-    $SignInBody = @{ userName = $UserName; password = $Password } | ConvertTo-Json
-    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType 'application/json' -Body $SignInBody
-    $CustomerAccessToken = $SignIn.accessToken
-    $CustomerHeaders = @{ Authorization = "Bearer $CustomerAccessToken" }
+    var userName = Environment.GetEnvironmentVariable("UMEC_CUSTOMER_USER");
+    var password = Environment.GetEnvironmentVariable("UMEC_CUSTOMER_PASSWORD");
+    var signIn = await http.PostAsJsonAsync($"{baseUrl}/api/customer/v1/signin", new { userName, password });
+    signIn.EnsureSuccessStatusCode();
+    var signInPayload = await signIn.Content.ReadFromJsonAsync<JsonElement>();
+    var customerAccessToken = signInPayload.GetProperty("accessToken").GetString();
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
 
-    # Шаг 2: получение device_code/user_code
-    $DeviceAuth = Invoke-RestMethod -Method Post -Uri "$IdentityBase/connect/deviceauthorization" -ContentType 'application/x-www-form-urlencoded' -Body @{ client_id = 'controller' }
-    $DeviceCode = $DeviceAuth.device_code
-    $UserCode = $DeviceAuth.user_code
-    $VerificationUri = $DeviceAuth.verification_uri
-    $PollInterval = [int]$DeviceAuth.interval
-    if (-not $PollInterval -or $PollInterval -le 0) { $PollInterval = 5 }
+    var deviceAuth = await http.PostAsync($"{identityBase}/connect/deviceauthorization", new FormUrlEncodedContent(new Dictionary<string, string> { ["client_id"] = "controller" }));
+    deviceAuth.EnsureSuccessStatusCode();
+    var deviceData = await deviceAuth.Content.ReadFromJsonAsync<JsonElement>();
+    var deviceCode = deviceData.GetProperty("device_code").GetString();
+    var userCode = deviceData.GetProperty("user_code").GetString();
+    var verificationUri = deviceData.GetProperty("verification_uri").GetString();
+    var pollInterval = deviceData.TryGetProperty("interval", out var intervalEl) ? intervalEl.GetInt32() : 5;
 
-    # Шаг 3: bind устройства
-    $DeviceSerial = $env:UMEC_DEVICE_SERIAL
-    $VendorCode = $env:UMEC_VENDOR_CODE
-    $ModelCode = $env:UMEC_MODEL_CODE
-    $FirmwareVersion = $env:UMEC_FIRMWARE_VERSION
-    $HardwareVersion = $env:UMEC_HARDWARE_VERSION
-    $DeviceMac = $env:UMEC_DEVICE_MAC
-    if (-not $DeviceSerial -or -not $VendorCode -or -not $ModelCode -or -not $FirmwareVersion -or -not $HardwareVersion -or -not $DeviceMac) {
-      throw 'Не заданы UMEC_DEVICE_SERIAL/UMEC_VENDOR_CODE/UMEC_MODEL_CODE/UMEC_FIRMWARE_VERSION/UMEC_HARDWARE_VERSION/UMEC_DEVICE_MAC'
-    }
+    var bindResp = await http.PostAsJsonAsync($"{baseUrl}/api/customer/v1/units/bind", new
+    {
+        deviceSerial = Environment.GetEnvironmentVariable("UMEC_DEVICE_SERIAL"),
+        userCode,
+        verificationUrl = verificationUri,
+        firmware = new
+        {
+            vendorCode = Environment.GetEnvironmentVariable("UMEC_VENDOR_CODE"),
+            modelCode = Environment.GetEnvironmentVariable("UMEC_MODEL_CODE"),
+            firmwareVersion = Environment.GetEnvironmentVariable("UMEC_FIRMWARE_VERSION"),
+            hardwareVersion = Environment.GetEnvironmentVariable("UMEC_HARDWARE_VERSION")
+        },
+        deviceMacAddress = Environment.GetEnvironmentVariable("UMEC_DEVICE_MAC"),
+        location = new { latitude = 55.7558, longitude = 37.6173 }
+    });
+    bindResp.EnsureSuccessStatusCode();
+    var bindData = await bindResp.Content.ReadFromJsonAsync<JsonElement>();
+    var boundUnitIds = bindData.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("unitId").GetInt64()).ToArray();
 
-    $BindBody = @{
-      deviceSerial = $DeviceSerial
-      userCode = $UserCode
-      verificationUrl = $VerificationUri
-      firmware = @{
-        vendorCode = $VendorCode
-        modelCode = $ModelCode
-        firmwareVersion = $FirmwareVersion
-        hardwareVersion = $HardwareVersion
-      }
-      deviceMacAddress = $DeviceMac
-      location = @{ latitude = 55.7558; longitude = 37.6173 }
-    } | ConvertTo-Json -Depth 10
+    var unitsResp = await http.GetAsync($"{baseUrl}/api/customer/v1/units");
+    unitsResp.EnsureSuccessStatusCode();
+    var unitsData = await unitsResp.Content.ReadFromJsonAsync<JsonElement>();
+    var actualUnitIds = unitsData.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("unitId").GetInt64()).ToHashSet();
+    if (!boundUnitIds.Any(id => actualUnitIds.Contains(id))) throw new Exception("Привязанное устройство не найдено в GET /api/customer/v1/units");
 
-    $BindResp = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/units/bind" -Headers $CustomerHeaders -ContentType 'application/json' -Body $BindBody
-    if (-not $BindResp.items -or $BindResp.items.Count -eq 0) { throw 'Bind выполнен без items в ответе' }
-    $BoundUnitIds = @($BindResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
-    if (-not $BoundUnitIds -or $BoundUnitIds.Count -eq 0) { throw 'В ответе bind отсутствуют unitId' }
-
-    # Шаг 4: проверка, что привязанное устройство присутствует в профиле
-    $UnitsResp = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/customer/v1/units" -Headers $CustomerHeaders
-    if (-not $UnitsResp.items -or $UnitsResp.items.Count -eq 0) { throw 'Список units пуст после bind' }
-    $ActualUnitIds = @($UnitsResp.items | Where-Object { $_.unitId } | ForEach-Object { $_.unitId })
-    $HasBoundUnit = $false
-    foreach ($id in $BoundUnitIds) {
-      if ($ActualUnitIds -contains $id) { $HasBoundUnit = $true; break }
-    }
-    if (-not $HasBoundUnit) { throw 'Привязанное устройство не найдено в GET /api/customer/v1/units' }
-
-    # Шаг 5: получение device token
-
-    $ServiceDeviceAccessToken = $null
-    for ($i = 0; $i -lt 120; $i++) {
-      try {
-        $TokenResp = Invoke-RestMethod -Method Post -Uri "$IdentityBase/connect/token" -ContentType 'application/x-www-form-urlencoded' -Body @{
-          grant_type = 'urn:ietf:params:oauth:grant-type:device_code'
-          device_code = $DeviceCode
-          client_id = 'controller'
+    string? serviceDeviceAccessToken = null;
+    for (var i = 0; i < 120; i++)
+    {
+        var tokenResp = await http.PostAsync($"{identityBase}/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["device_code"] = deviceCode!,
+            ["client_id"] = "controller"
+        }));
+        var payload = JsonDocument.Parse(await tokenResp.Content.ReadAsStringAsync()).RootElement;
+        if (tokenResp.IsSuccessStatusCode && payload.TryGetProperty("access_token", out var tokenEl))
+        {
+            serviceDeviceAccessToken = tokenEl.GetString();
+            break;
         }
-
-        if ($TokenResp.access_token) {
-          $ServiceDeviceAccessToken = $TokenResp.access_token
-          break
-        }
-      }
-      catch {
-        $ErrPayload = $_.ErrorDetails.Message | ConvertFrom-Json
-        if ($ErrPayload.error -eq 'authorization_pending') { Start-Sleep -Seconds $PollInterval; continue }
-        if ($ErrPayload.error -eq 'slow_down') { $PollInterval += 5; Start-Sleep -Seconds $PollInterval; continue }
-        throw
-      }
+        var error = payload.TryGetProperty("error", out var errorEl) ? errorEl.GetString() : null;
+        if (error == "authorization_pending") { await Task.Delay(pollInterval * 1000); continue; }
+        if (error == "slow_down") { pollInterval += 5; await Task.Delay(pollInterval * 1000); continue; }
+        throw new Exception(payload.ToString());
     }
 
-    if (-not $ServiceDeviceAccessToken) { throw 'Не удалось получить device token за отведенное время' }
-    "device token acquired: $([bool]$ServiceDeviceAccessToken)"
+    if (string.IsNullOrWhiteSpace(serviceDeviceAccessToken)) throw new Exception("Не удалось получить device token за отведенное время");
+    Console.WriteLine($"device token acquired: {!string.IsNullOrEmpty(serviceDeviceAccessToken)}");
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const identityBase = "https://http-identity.umecdev.deviot.cloud";
+
+    const userName = process.env.UMEC_CUSTOMER_USER;
+    const password = process.env.UMEC_CUSTOMER_PASSWORD;
+    const signIn = await fetch(`${baseUrl}/api/customer/v1/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName, password }),
+    });
+    if (!signIn.ok) throw new Error(await signIn.text());
+    const { accessToken: customerAccessToken } = await signIn.json();
+    const customerHeaders = { Authorization: `Bearer ${customerAccessToken}`, "Content-Type": "application/json" };
+
+    const deviceAuth = await fetch(`${identityBase}/connect/deviceauthorization`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: "controller" }),
+    });
+    if (!deviceAuth.ok) throw new Error(await deviceAuth.text());
+    const deviceData = await deviceAuth.json();
+    const deviceCode = deviceData.device_code;
+    const userCode = deviceData.user_code;
+    const verificationUri = deviceData.verification_uri;
+    let pollInterval = Number(deviceData.interval || 5);
+
+    const bindResp = await fetch(`${baseUrl}/api/customer/v1/units/bind`, {
+      method: "POST",
+      headers: customerHeaders,
+      body: JSON.stringify({
+        deviceSerial: process.env.UMEC_DEVICE_SERIAL,
+        userCode,
+        verificationUrl: verificationUri,
+        firmware: {
+          vendorCode: process.env.UMEC_VENDOR_CODE,
+          modelCode: process.env.UMEC_MODEL_CODE,
+          firmwareVersion: process.env.UMEC_FIRMWARE_VERSION,
+          hardwareVersion: process.env.UMEC_HARDWARE_VERSION,
+        },
+        deviceMacAddress: process.env.UMEC_DEVICE_MAC,
+        location: { latitude: 55.7558, longitude: 37.6173 },
+      }),
+    });
+    if (!bindResp.ok) throw new Error(await bindResp.text());
+    const bindData = await bindResp.json();
+    const boundUnitIds = (bindData.items ?? []).map((x) => x.unitId).filter(Boolean);
+
+    const unitsResp = await fetch(`${baseUrl}/api/customer/v1/units`, { headers: { Authorization: `Bearer ${customerAccessToken}` } });
+    if (!unitsResp.ok) throw new Error(await unitsResp.text());
+    const unitsData = await unitsResp.json();
+    const actualUnitIds = new Set((unitsData.items ?? []).map((x) => x.unitId).filter(Boolean));
+    if (!boundUnitIds.some((id) => actualUnitIds.has(id))) throw new Error("Привязанное устройство не найдено в GET /api/customer/v1/units");
+
+    let serviceDeviceAccessToken = null;
+    for (let i = 0; i < 120; i += 1) {
+      const tokenResp = await fetch(`${identityBase}/connect/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCode,
+          client_id: "controller",
+        }),
+      });
+      const payload = await tokenResp.json();
+      if (tokenResp.ok && payload.access_token) {
+        serviceDeviceAccessToken = payload.access_token;
+        break;
+      }
+      if (payload.error === "authorization_pending") { await new Promise((r) => setTimeout(r, pollInterval * 1000)); continue; }
+      if (payload.error === "slow_down") { pollInterval += 5; await new Promise((r) => setTimeout(r, pollInterval * 1000)); continue; }
+      throw new Error(JSON.stringify(payload));
+    }
+
+    if (!serviceDeviceAccessToken) throw new Error("Не удалось получить device token за отведенное время");
+    console.log("device token acquired:", Boolean(serviceDeviceAccessToken));
     ```

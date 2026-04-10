@@ -1,5 +1,4 @@
 # Документация: https://www.mkdocs.org/ и https://squidfunk.github.io/mkdocs-material/
-# После создания репозитория на GitHub замените site_url на фактический адрес Pages.
 site_name: UMEC Documentation
 site_description: Пошаговые сценарии UMEC REST API
 site_url: https://UMEC-Corp.github.io/utilities-quickstarts/

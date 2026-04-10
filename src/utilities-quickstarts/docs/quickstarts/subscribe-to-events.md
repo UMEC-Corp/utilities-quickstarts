@@ -29,12 +29,32 @@
     access_token = signin.json()["accessToken"]
     ```
 
-=== "PowerShell"
-    ```powershell
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $SignInBody = @{ userName = "customer_demo"; password = "change_me_password" } | ConvertTo-Json
-    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType "application/json" -Body $SignInBody
-    $AccessToken = $SignIn.accessToken
+=== "C#"
+    ```csharp
+    using System.Net.Http.Json;
+    using System.Text.Json;
+
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    using var http = new HttpClient();
+    var signInResponse = await http.PostAsJsonAsync(
+        $"{baseUrl}/api/customer/v1/signin",
+        new { userName = "customer_demo", password = "change_me_password" }
+    );
+    signInResponse.EnsureSuccessStatusCode();
+    var signInPayload = await signInResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var accessToken = signInPayload.GetProperty("accessToken").GetString();
+    ```
+
+=== "Node.js"
+    ```javascript
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const signIn = await fetch(`${baseUrl}/api/customer/v1/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName: "customer_demo", password: "change_me_password" }),
+    });
+    if (!signIn.ok) throw new Error(await signIn.text());
+    const { accessToken } = await signIn.json();
     ```
 
 ### 2. Откройте WebSocket-соединение, вызовите RPC-метод `connect-customer` и сохраните `connectionKey`.
@@ -60,24 +80,44 @@
             return ws, connection_key
     ```
 
-=== "PowerShell"
-    ```powershell
-    Add-Type -AssemblyName System.Net.WebSockets
-    Add-Type -AssemblyName System.Text
+=== "C#"
+    ```csharp
+    using System.Net.WebSockets;
+    using System.Text;
+    using System.Text.Json;
 
-    $WsUri = [Uri]"wss://ws.rumecdev.deviot.cloud/ws"
-    $Ws = [System.Net.WebSockets.ClientWebSocket]::new()
-    $Ws.ConnectAsync($WsUri, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    var wsUrl = "wss://ws.rumecdev.deviot.cloud/ws";
+    using var ws = new ClientWebSocket();
+    await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
 
-    $ConnectRequest = @{
-      jsonrpc = "2.0"
-      id = 1
-      method = "connect-customer"
-      params = @{ authToken = $AccessToken }
-    } | ConvertTo-Json -Depth 10
+    var connectRequest = JsonSerializer.Serialize(new
+    {
+        jsonrpc = "2.0",
+        id = 1,
+        method = "connect-customer",
+        @params = new { authToken = accessToken }
+    });
+    var connectBytes = Encoding.UTF8.GetBytes(connectRequest);
+    await ws.SendAsync(connectBytes, WebSocketMessageType.Text, true, CancellationToken.None);
+    ```
 
-    $Bytes = [Text.Encoding]::UTF8.GetBytes($ConnectRequest)
-    $Ws.SendAsync([ArraySegment[byte]]::new($Bytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+=== "Node.js"
+    ```javascript
+    import WebSocket from "ws";
+
+    const wsUrl = "wss://ws.rumecdev.deviot.cloud/ws";
+    const ws = new WebSocket(wsUrl);
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    ws.send(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "connect-customer",
+      params: { authToken: accessToken },
+    }));
     ```
 
 ### 3. Подпишитесь методом `subscribe-units` на нужные `unitIds`.
@@ -98,23 +138,33 @@
         print(response)
     ```
 
-=== "PowerShell"
-    ```powershell
-    $UnitIds = @("8f8a6df4f7f54e7aaf12e4b3f8112c13/main")
-    $ConnectionKey = "connection-key-from-connect-response"
+=== "C#"
+    ```csharp
+    var unitIds = new[] { "8f8a6df4f7f54e7aaf12e4b3f8112c13/main" };
+    var connectionKey = "connection-key-from-connect-response";
 
-    $SubscribeRequest = @{
-      jsonrpc = "2.0"
-      id = 2
-      method = "subscribe-units"
-      params = @{
-        connectionKey = $ConnectionKey
-        unitIds = $UnitIds
-      }
-    } | ConvertTo-Json -Depth 10
+    var subscribeRequest = JsonSerializer.Serialize(new
+    {
+        jsonrpc = "2.0",
+        id = 2,
+        method = "subscribe-units",
+        @params = new { connectionKey, unitIds }
+    });
+    var subscribeBytes = Encoding.UTF8.GetBytes(subscribeRequest);
+    await ws.SendAsync(subscribeBytes, WebSocketMessageType.Text, true, CancellationToken.None);
+    ```
 
-    $SubscribeBytes = [Text.Encoding]::UTF8.GetBytes($SubscribeRequest)
-    $Ws.SendAsync([ArraySegment[byte]]::new($SubscribeBytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+=== "Node.js"
+    ```javascript
+    const unitIds = ["8f8a6df4f7f54e7aaf12e4b3f8112c13/main"];
+    const connectionKey = "connection-key-from-connect-response";
+
+    ws.send(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "subscribe-units",
+      params: { connectionKey, unitIds },
+    }));
     ```
 
 ### 4. Принимайте входящие уведомления с методом `unit-event`.
@@ -128,13 +178,29 @@
                 print("unit-event:", msg)
     ```
 
-=== "PowerShell"
-    ```powershell
-    $Buffer = New-Object byte[] 8192
-    $Segment = [ArraySegment[byte]]::new($Buffer)
-    $Result = $Ws.ReceiveAsync($Segment, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $Message = [Text.Encoding]::UTF8.GetString($Buffer, 0, $Result.Count)
-    $Message
+=== "C#"
+    ```csharp
+    var buffer = new byte[8192];
+    while (true)
+    {
+        var result = await ws.ReceiveAsync(buffer, CancellationToken.None);
+        var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+        var json = JsonDocument.Parse(message).RootElement;
+        if (json.TryGetProperty("method", out var method) && method.GetString() == "unit-event")
+        {
+            Console.WriteLine($"unit-event: {message}");
+        }
+    }
+    ```
+
+=== "Node.js"
+    ```javascript
+    ws.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.method === "unit-event") {
+        console.log("unit-event:", msg);
+      }
+    });
     ```
 
 ## Ожидаемый результат
@@ -196,37 +262,107 @@
     asyncio.run(main())
     ```
 
-=== "PowerShell"
-    ```powershell
-    Add-Type -AssemblyName System.Net.WebSockets
-    Add-Type -AssemblyName System.Text
+=== "C#"
+    ```csharp
+    using System.Net.Http.Json;
+    using System.Net.WebSockets;
+    using System.Text;
+    using System.Text.Json;
 
-    $BaseUrl = "https://api.umecdev.deviot.cloud"
-    $WsUri = [Uri]"wss://ws.rumecdev.deviot.cloud/ws"
-    $UnitIds = @("8f8a6df4f7f54e7aaf12e4b3f8112c13/main")
+    var baseUrl = "https://api.umecdev.deviot.cloud";
+    var wsUrl = "wss://ws.rumecdev.deviot.cloud/ws";
+    var unitIds = new[] { "8f8a6df4f7f54e7aaf12e4b3f8112c13/main" };
 
-    # Шаг 1: авторизация customer
-    $SignInBody = @{ userName = "customer_demo"; password = "change_me_password" } | ConvertTo-Json
-    $SignIn = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/customer/v1/signin" -ContentType "application/json" -Body $SignInBody
-    $AccessToken = $SignIn.accessToken
+    using var http = new HttpClient();
+    var signInResponse = await http.PostAsJsonAsync(
+        $"{baseUrl}/api/customer/v1/signin",
+        new { userName = "customer_demo", password = "change_me_password" }
+    );
+    signInResponse.EnsureSuccessStatusCode();
+    var signInPayload = await signInResponse.Content.ReadFromJsonAsync<JsonElement>();
+    var accessToken = signInPayload.GetProperty("accessToken").GetString();
 
-    # Шаг 2: connect-customer
-    $Ws = [System.Net.WebSockets.ClientWebSocket]::new()
-    $Ws.ConnectAsync($WsUri, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $ConnectRequest = @{ jsonrpc = "2.0"; id = 1; method = "connect-customer"; params = @{ authToken = $AccessToken } } | ConvertTo-Json -Depth 10
-    $ConnectBytes = [Text.Encoding]::UTF8.GetBytes($ConnectRequest)
-    $Ws.SendAsync([ArraySegment[byte]]::new($ConnectBytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    using var ws = new ClientWebSocket();
+    await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
 
-    # Шаг 3: subscribe-units
-    $ConnectionKey = "connection-key-from-connect-response"
-    $SubscribeRequest = @{ jsonrpc = "2.0"; id = 2; method = "subscribe-units"; params = @{ connectionKey = $ConnectionKey; unitIds = $UnitIds } } | ConvertTo-Json -Depth 10
-    $SubscribeBytes = [Text.Encoding]::UTF8.GetBytes($SubscribeRequest)
-    $Ws.SendAsync([ArraySegment[byte]]::new($SubscribeBytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    var connectPayload = JsonSerializer.Serialize(new
+    {
+        jsonrpc = "2.0",
+        id = 1,
+        method = "connect-customer",
+        @params = new { authToken = accessToken }
+    });
+    await ws.SendAsync(Encoding.UTF8.GetBytes(connectPayload), WebSocketMessageType.Text, true, CancellationToken.None);
 
-    # Шаг 4: получение unit-event
-    $Buffer = New-Object byte[] 8192
-    $Segment = [ArraySegment[byte]]::new($Buffer)
-    $Result = $Ws.ReceiveAsync($Segment, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $Message = [Text.Encoding]::UTF8.GetString($Buffer, 0, $Result.Count)
-    $Message
+    var recvBuffer = new byte[8192];
+    var connectResult = await ws.ReceiveAsync(recvBuffer, CancellationToken.None);
+    var connectJson = JsonDocument.Parse(Encoding.UTF8.GetString(recvBuffer, 0, connectResult.Count)).RootElement;
+    var connectionKey = connectJson.GetProperty("result").GetProperty("connectionKey").GetString();
+
+    var subscribePayload = JsonSerializer.Serialize(new
+    {
+        jsonrpc = "2.0",
+        id = 2,
+        method = "subscribe-units",
+        @params = new { connectionKey, unitIds }
+    });
+    await ws.SendAsync(Encoding.UTF8.GetBytes(subscribePayload), WebSocketMessageType.Text, true, CancellationToken.None);
+
+    while (true)
+    {
+        var result = await ws.ReceiveAsync(recvBuffer, CancellationToken.None);
+        var message = Encoding.UTF8.GetString(recvBuffer, 0, result.Count);
+        var msgJson = JsonDocument.Parse(message).RootElement;
+        if (msgJson.TryGetProperty("method", out var method) && method.GetString() == "unit-event")
+            Console.WriteLine($"unit-event: {message}");
+    }
+    ```
+
+=== "Node.js"
+    ```javascript
+    import WebSocket from "ws";
+
+    const baseUrl = "https://api.umecdev.deviot.cloud";
+    const wsUrl = "wss://ws.rumecdev.deviot.cloud/ws";
+    const unitIds = ["8f8a6df4f7f54e7aaf12e4b3f8112c13/main"];
+
+    const signIn = await fetch(`${baseUrl}/api/customer/v1/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName: "customer_demo", password: "change_me_password" }),
+    });
+    if (!signIn.ok) throw new Error(await signIn.text());
+    const { accessToken } = await signIn.json();
+
+    const ws = new WebSocket(wsUrl);
+    await new Promise((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    ws.send(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "connect-customer",
+      params: { authToken: accessToken },
+    }));
+
+    const connectionKey = await new Promise((resolve) => {
+      ws.once("message", (raw) => {
+        const msg = JSON.parse(raw.toString());
+        resolve(msg.result.connectionKey);
+      });
+    });
+
+    ws.send(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "subscribe-units",
+      params: { connectionKey, unitIds },
+    }));
+
+    ws.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.method === "unit-event") console.log("unit-event:", msg);
+    });
     ```
