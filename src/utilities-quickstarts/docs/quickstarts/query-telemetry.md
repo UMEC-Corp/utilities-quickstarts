@@ -63,7 +63,7 @@
     const headers = { Authorization: `Bearer ${accessToken}` };
     ```
 
-### 2. Получите `unitId` из списка устройств customer (`GET /api/customer/v1/units`).
+### 2. Получите `unitId` из списка устройств пользователя (`GET /api/customer/v1/units`).
 
 === "Python"
     ```python
@@ -94,7 +94,7 @@
     const unitId = unitsData.items[0].unitId;
     ```
 
-### 3. Получите ID сенсоров (`inputIds`) из деталей устройства (`GET /api/customer/v1/units/{unitId}`), затем сформируйте список `inputIds` для запроса телеметрии.
+### 3. Получите идентификаторы сенсоров (`inputIds`) из данных устройства (`GET /api/customer/v1/units/{unitId}`).
 
 === "Python"
     ```python
@@ -106,7 +106,7 @@
     unit_details.raise_for_status()
     inputs = unit_details.json().get("item", {}).get("inputs", [])
     if not inputs:
-        raise RuntimeError("У устройства отсутствуют входы")
+        raise RuntimeError("У устройства отсутствуют сенсоры")
     input_ids = [inputs[0]["id"]]
     ```
 
@@ -116,7 +116,7 @@
     unitDetailsResponse.EnsureSuccessStatusCode();
     var unitDetails = await unitDetailsResponse.Content.ReadFromJsonAsync<JsonElement>();
     var inputs = unitDetails.GetProperty("item").GetProperty("inputs");
-    if (inputs.GetArrayLength() == 0) throw new Exception("У устройства отсутствуют входы");
+    if (inputs.GetArrayLength() == 0) throw new Exception("У устройства отсутствуют сенсоры");
     var inputIds = new[] { inputs[0].GetProperty("id").GetString()! };
     ```
 
@@ -126,7 +126,7 @@
     if (!unitDetailsResp.ok) throw new Error(await unitDetailsResp.text());
     const unitDetails = await unitDetailsResp.json();
     const inputs = unitDetails.item?.inputs ?? [];
-    if (!inputs.length) throw new Error("У устройства отсутствуют входы");
+    if (!inputs.length) throw new Error("У устройства отсутствуют сенсоры");
     const inputIds = [inputs[0].id];
     ```
 
@@ -209,7 +209,7 @@
     unit_details.raise_for_status()
     inputs = unit_details.json().get("item", {}).get("inputs", [])
     if not inputs:
-        raise RuntimeError("У устройства отсутствуют входы")
+        raise RuntimeError("У устройства отсутствуют сенсоры")
     input_ids = [inputs[0]["id"]]
 
     # Шаг 4: запрос телеметрии
@@ -262,7 +262,7 @@
     unitDetailsResponse.EnsureSuccessStatusCode();
     var unitDetails = await unitDetailsResponse.Content.ReadFromJsonAsync<JsonElement>();
     var inputs = unitDetails.GetProperty("item").GetProperty("inputs");
-    if (inputs.GetArrayLength() == 0) throw new Exception("У устройства отсутствуют входы");
+    if (inputs.GetArrayLength() == 0) throw new Exception("У устройства отсутствуют сенсоры");
     var inputId = inputs[0].GetProperty("id").GetString();
 
     // Шаг 4: запрос телеметрии
@@ -298,7 +298,7 @@
     if (!unitDetailsResp.ok) throw new Error(await unitDetailsResp.text());
     const unitDetails = await unitDetailsResp.json();
     const inputs = unitDetails.item?.inputs ?? [];
-    if (!inputs.length) throw new Error("У устройства отсутствуют входы");
+    if (!inputs.length) throw new Error("У устройства отсутствуют сенсоры");
     const inputId = inputs[0].id;
 
     // Шаг 4: запрос телеметрии

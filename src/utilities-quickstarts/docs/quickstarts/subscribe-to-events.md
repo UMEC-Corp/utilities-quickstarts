@@ -1,4 +1,4 @@
-**Сценарий: Подписка на события по вебсокетам**
+**Сценарий: Подписка на события через WebSocket**
 
 ## Цель
 
@@ -12,7 +12,7 @@
 
 ## Шаги
 
-### 1. Получите customer `accessToken` через `POST /api/customer/v1/signin`.
+### 1. Получите `accessToken` пользователя через `POST /api/customer/v1/signin`.
 
 === "Python"
     ```python
@@ -207,7 +207,7 @@
 
 - Получен `connectionKey` после `connect-customer`.
 - Подписка подтверждена ответом `subscribe-units` (`subscribedCount`, `subscribedUnitIds`).
-- В сокет приходят JSON-RPC уведомления с методом `unit-event`.
+- В WebSocket-соединение приходят JSON-RPC-уведомления с методом `unit-event`.
 
 ## Полный скрипт сценария
 

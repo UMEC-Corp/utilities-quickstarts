@@ -47,7 +47,7 @@ extra_css:
 nav:
   - Создание новой модели: quickstarts/new-model.md
   - Привязка устройства: quickstarts/bind-and-provision.md
-  - История показаний: quickstarts/query-telemetry.md
+  - Запрос телеметрии: quickstarts/query-telemetry.md
   - Подписка на события юнита: quickstarts/subscribe-to-events.md
 
 

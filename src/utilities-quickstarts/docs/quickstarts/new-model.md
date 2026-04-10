@@ -73,7 +73,7 @@
     if (!resp.ok) throw new Error("Vendor registration failed");
     ```
 
-### 2. Получите access token через Identity (`POST /connect/token`).
+### 2. Получите токен доступа (`access token`) через Identity (`POST /connect/token`).
 
 Формат запроса: `application/x-www-form-urlencoded`.
 
@@ -141,7 +141,7 @@
     console.log("token acquired:", Boolean(accessToken));
     ```
 
-### 3. Добавьте модель сенсора температуры (`POST /api/vendor/v1/sensors`).
+### 3. Добавьте сенсор температуры (`POST /api/vendor/v1/sensors`).
 
 === "Python"
     ```python
@@ -360,7 +360,7 @@
 
 - Вендор зарегистрирован.
 - Сенсор `temp_c` добавлен в каталог сенсоров вендора.
-- Модель `demo-temp-model-v1` создана/обновлена и содержит unit с температурным сенсором.
+- Модель `demo-temp-model-v1` создана/обновлена и содержит юнит `main` с температурным сенсором.
 
 ## Полный скрипт сценария
 

@@ -7,12 +7,12 @@
 ## Предусловия
 
 - **Выполнен сценарий [Создание новой модели](new-model.md), получены `vendorCode`, `modelCode`, `firmwareVersion`, `hardwareVersion`.**
-- Доступны учетные данные customer-пользователя: `UMEC_CUSTOMER_USER`, `UMEC_CUSTOMER_PASSWORD`.
+- Доступны учетные данные пользователя: `UMEC_CUSTOMER_USER`, `UMEC_CUSTOMER_PASSWORD`.
 - Доступны параметры устройства: `UMEC_DEVICE_SERIAL`, `UMEC_DEVICE_MAC`.
 
 ## Шаги
 
-### 1. Авторизоваться как customer и получить `accessToken` (`POST /api/customer/v1/signin`).
+### 1. Авторизуйтесь как customer и получите `accessToken` (`POST /api/customer/v1/signin`).
 
 === "Python"
     ```python
@@ -69,7 +69,7 @@
     console.log("customer_access_token acquired:", Boolean(customerAccessToken));
     ```
 
-### 2. Получить `device_code`, `user_code`, `verification_uri`, `verification_uri_complete` в Identity (`POST /connect/deviceauthorization`).
+### 2. Получите `device_code`, `user_code`, `verification_uri`, `verification_uri_complete` в Identity (`POST /connect/deviceauthorization`).
 
 === "Python"
     ```python
@@ -139,7 +139,7 @@
     console.log("User code:", userCode);
     ```
 
-### 3. Выполнить привязку устройства (`POST /api/customer/v1/units/bind`).
+### 3. Выполните привязку устройства (`POST /api/customer/v1/units/bind`).
 
 === "Python"
     ```python
@@ -255,7 +255,7 @@
     console.log("bound unitIds:", boundUnitIds);
     ```
 
-### 4. Проверить наличие привязанного устройства: получить список устройств и убедиться, что в нем присутствует хотя бы один `unitId` из ответа bind.
+### 4. Проверьте наличие привязанного устройства: получите список устройств и убедитесь, что в нем есть хотя бы один `unitId` из ответа привязки (`bind`).
 
 === "Python"
     ```python
@@ -320,7 +320,7 @@
     console.log("bind verification passed");
     ```
 
-### 5. Получить device token в Identity (`POST /connect/token`).
+### 5. Получите токен устройства (`device token`) в Identity (`POST /connect/token`).
 
 === "Python"
     ```python
@@ -443,7 +443,7 @@
 ## Ожидаемый результат
 
 - Привязка успешно выполнена, в ответе получены `items` с `unitId`.
-- В результате проверки найдено хотя бы одно устройство с `unitId` из ответа bind.
+- В результате проверки найдено хотя бы одно устройство с `unitId` из ответа привязки (`bind`).
 - Получен токен устройства.
 
 ## Полный скрипт сценария
